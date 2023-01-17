@@ -1,2 +1,4 @@
 # canbus_solar_mppt
-canbus_solar_mppt
+CAN-connected solar MPPT controller
+
+This is a solar MPPT controller, targetted at marine applications with a CAN bus connection.
