@@ -1278,6 +1278,9 @@
     (path "/f749a8fe-5d5e-4748-ac37-3f3af8e2d0e8/9fa82b34-3385-445d-9fe9-7b481d9e7dc0"
       (reference "#PWR?") (unit 1) (value "GND") (footprint "")
     )
+    (path "/650b59c2-5f26-43cd-9e0c-72411aac3a49/abade381-d526-46ee-845b-7d8514925a1e"
+      (reference "#PWR?") (unit 1) (value "GND") (footprint "")
+    )
     (path "/ba3cf108-e3b9-4e7e-b296-58089fe966d1"
       (reference "#PWR?") (unit 1) (value "GND") (footprint "")
     )
@@ -1311,6 +1314,9 @@
     (path "/16c9b66a-b9ac-4149-a27c-8624723e6a82"
       (reference "C?") (unit 1) (value "4.7µ50V") (footprint "Capacitor_SMD:C_1206_3216Metric_Pad1.33x1.80mm_HandSolder")
     )
+    (path "/f749a8fe-5d5e-4748-ac37-3f3af8e2d0e8/18f1d5e2-5d86-4ced-af3e-3b7e3b7ea41e"
+      (reference "C?") (unit 1) (value "100n") (footprint "local:C_filter_0805")
+    )
     (path "/2c1711b5-4387-4976-9bde-54707ad4d3bf"
       (reference "C?") (unit 1) (value "100p") (footprint "Capacitor_SMD:C_0805_2012Metric_Pad1.18x1.45mm_HandSolder")
     )
@@ -1325,6 +1331,9 @@
     )
     (path "/5a7b57bb-c555-4dba-a364-dbe110ddd92c"
       (reference "C?") (unit 1) (value "22µ") (footprint "Capacitor_SMD:C_1206_3216Metric_Pad1.33x1.80mm_HandSolder")
+    )
+    (path "/650b59c2-5f26-43cd-9e0c-72411aac3a49/5b49560d-512c-4a74-b19e-d7146d67da20"
+      (reference "C?") (unit 1) (value "YFF31HC") (footprint "local:C_filter_1206")
     )
     (path "/66b6a251-cfb0-447a-a2ae-cde0a8a970f6"
       (reference "C?") (unit 1) (value "22µ") (footprint "Capacitor_SMD:C_1206_3216Metric_Pad1.33x1.80mm_HandSolder")
@@ -1343,6 +1352,12 @@
     )
     (path "/f749a8fe-5d5e-4748-ac37-3f3af8e2d0e8/d0201508-615a-4aab-a148-3578ccf2a15e"
       (reference "C?") (unit 1) (value "22pF") (footprint "Capacitor_THT:C_Disc_D3.8mm_W2.6mm_P2.50mm")
+    )
+    (path "/650b59c2-5f26-43cd-9e0c-72411aac3a49/df76603e-0765-462f-a3c4-5afeaa3590b0"
+      (reference "C?") (unit 1) (value "YFF31HC") (footprint "local:C_filter_1206")
+    )
+    (path "/650b59c2-5f26-43cd-9e0c-72411aac3a49/e2f6369a-02b5-4d5b-ba47-235a0926e866"
+      (reference "C?") (unit 1) (value "YFF31HC") (footprint "local:C_filter_1206")
     )
     (path "/0fe60029-f7e3-4007-a3d9-2206cadbe88f"
       (reference "D?") (unit 1) (value "PMEG4005") (footprint "Diode_SMD:D_SOD-123")
