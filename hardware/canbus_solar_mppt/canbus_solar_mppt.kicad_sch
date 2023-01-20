@@ -2505,7 +2505,7 @@
       (reference "SW?") (unit 1) (value "next") (footprint "Button_Switch_THT:Push_E-Switch_KS01Q01")
     )
     (path "/f749a8fe-5d5e-4748-ac37-3f3af8e2d0e8/f24082c3-7636-411e-8431-8e24db80d342"
-      (reference "TH?") (unit 1) (value "NTC10K") (footprint "TerminalBlock_TE-Connectivity:TerminalBlock_TE_282834-2_1x02_P2.54mm_Horizontal")
+      (reference "TH?") (unit 1) (value "NTC10K") (footprint "Resistor_SMD:R_0201_0603Metric_Pad0.64x0.40mm_HandSolder")
     )
     (path "/650b59c2-5f26-43cd-9e0c-72411aac3a49/1c2b5049-0723-4bed-a98e-4a2e6d66fbc3"
       (reference "U?") (unit 1) (value "NCP5901B") (footprint "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")
