@@ -1,3 +1,3 @@
 # CAN-connected solar MPPT controller
 
-This is a solar MPPT controller, targetted at marine applications with a CAN bus connection.
+This is a solar MPPT controller with dual-battery output and with a CAN bus, targetted at marine applications.
