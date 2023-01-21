@@ -2548,10 +2548,10 @@
       (reference "R18") (unit 1) (value "0.002") (footprint "local:R-Shunt_2512_6332Metric_Pad1.40x3.35mm_HandSolder")
     )
     (path "/650b59c2-5f26-43cd-9e0c-72411aac3a49/2b85288c-b938-482c-a74d-f8d5ecf762e4"
-      (reference "R19") (unit 1) (value "56K") (footprint "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal")
+      (reference "R19") (unit 1) (value "10K") (footprint "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal")
     )
     (path "/650b59c2-5f26-43cd-9e0c-72411aac3a49/8f9d3b3d-629a-4119-9bea-90feb549f41f"
-      (reference "R20") (unit 1) (value "56K") (footprint "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal")
+      (reference "R20") (unit 1) (value "10K") (footprint "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal")
     )
     (path "/650b59c2-5f26-43cd-9e0c-72411aac3a49/46e75ff1-4bac-4ae5-9968-f05326b97f0f"
       (reference "R21") (unit 1) (value "100K") (footprint "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal")
