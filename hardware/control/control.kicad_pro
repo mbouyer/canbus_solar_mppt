@@ -166,10 +166,7 @@
       "pin_to_pin|1308100|1384300|5c764dee-4076-4437-96c1-5b8428bb048f|c1ab57bd-8c32-4454-ac22-db5a2bda167b",
       "pin_to_pin|1333500|1384300|f7ae19b2-32f3-4348-b559-18b546d441ce|c1ab57bd-8c32-4454-ac22-db5a2bda167b",
       "pin_to_pin|1358900|1384300|2c7ddf17-c8b4-44b4-a4b8-fe23095684b5|c1ab57bd-8c32-4454-ac22-db5a2bda167b",
-      "pin_to_pin|1384300|1384300|49aec1db-afb3-4f3c-82b0-167d2e0540be|c1ab57bd-8c32-4454-ac22-db5a2bda167b",
-      "pin_to_pin|533400|1384300|c1ab57bd-8c32-4454-ac22-db5a2bda167b|f1b35fd0-2556-4d34-b6b2-6ff78c813619",
-      "power_pin_not_driven|2273300|1181100|3af2eb05-936f-4803-8645-16b8ed3d52f5|00000000-0000-0000-0000-000000000000",
-      "power_pin_not_driven|2273300|838200|045253f3-51bc-4214-b955-a2f28d28b7da|00000000-0000-0000-0000-000000000000"
+      "pin_to_pin|1384300|1384300|49aec1db-afb3-4f3c-82b0-167d2e0540be|c1ab57bd-8c32-4454-ac22-db5a2bda167b"
     ],
     "meta": {
       "version": 0
@@ -379,7 +376,7 @@
     "pinned_symbol_libs": []
   },
   "meta": {
-    "filename": "canbus_solar_mppt.kicad_pro",
+    "filename": "control.kicad_pro",
     "version": 1
   },
   "net_settings": {
@@ -460,14 +457,6 @@
     [
       "426ce493-8c21-474b-92c2-95f5ee65afd4",
       ""
-    ],
-    [
-      "650b59c2-5f26-43cd-9e0c-72411aac3a49",
-      "DC-DC"
-    ],
-    [
-      "f749a8fe-5d5e-4748-ac37-3f3af8e2d0e8",
-      "logic_canbus"
     ]
   ],
   "text_variables": {}
