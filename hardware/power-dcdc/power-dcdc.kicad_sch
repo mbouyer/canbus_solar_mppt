@@ -1541,7 +1541,6 @@
     )
   )
 
-
   (junction (at 157.48 73.66) (diameter 0) (color 0 0 0 0)
     (uuid 05b2881e-9a2c-4735-89be-c99f2fb1c497)
   )
@@ -3202,7 +3201,7 @@
     (property "Value" "10K" (id 1) (at 113.03 125.73 0)
       (effects (font (size 1.27 1.27)) (justify right))
     )
-    (property "Footprint" "Resistor_THT:R_Axial_DIN0309_L9.0mm_D3.2mm_P12.70mm_Horizontal" (id 2) (at 118.11 124.46 0)
+    (property "Footprint" "Resistor_SMD:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" (id 2) (at 118.11 124.46 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Datasheet" "~" (id 3) (at 118.11 124.46 0)
@@ -3495,7 +3494,7 @@
     (property "Value" "10K" (id 1) (at 153.67 125.73 0)
       (effects (font (size 1.27 1.27)) (justify right))
     )
-    (property "Footprint" "Resistor_SMD:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder" (id 2) (at 158.75 124.46 0)
+    (property "Footprint" "Resistor_THT:R_Axial_DIN0309_L9.0mm_D3.2mm_P12.70mm_Horizontal" (id 2) (at 158.75 124.46 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Datasheet" "~" (id 3) (at 158.75 124.46 0)
@@ -4360,6 +4359,9 @@
     (property "Datasheet" "~" (id 3) (at 93.345 90.17 0)
       (effects (font (size 1.27 1.27)) hide)
     )
+    (property "P/N" " SSW-105-01-T-D " (id 4) (at 93.345 90.17 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
     (pin "1" (uuid 9af0cf89-d41b-4f3e-b28d-bce2785f44bb))
     (pin "10" (uuid 71204d15-0001-4f4a-8527-9bc733469421))
     (pin "2" (uuid 103a1a52-a8dc-49c8-92ef-f294e9e10b94))
@@ -4751,6 +4753,9 @@
     (property "Datasheet" "~" (id 3) (at 92.075 116.84 0)
       (effects (font (size 1.27 1.27)) hide)
     )
+    (property "P/N" " SSW-105-01-T-D" (id 4) (at 92.075 116.84 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
     (pin "1" (uuid 0d1b9b4e-0d0d-4289-8955-b9d486babfbc))
     (pin "10" (uuid 37bef492-a71d-4c52-a507-c2a4e22ab84f))
     (pin "2" (uuid 4c4e24b7-bdb3-4129-9f6e-9b6b2bfc8c04))
@@ -4997,10 +5002,10 @@
       (reference "R6") (unit 1) (value "10K") (footprint "Resistor_SMD:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder")
     )
     (path "/1e11e7ee-1d09-4317-81f3-9082abf4db7f"
-      (reference "R7") (unit 1) (value "10K") (footprint "Resistor_THT:R_Axial_DIN0309_L9.0mm_D3.2mm_P12.70mm_Horizontal")
+      (reference "R7") (unit 1) (value "10K") (footprint "Resistor_SMD:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder")
     )
     (path "/47f33c80-6210-49e0-abe8-9697abdd5dd8"
-      (reference "R8") (unit 1) (value "10K") (footprint "Resistor_SMD:R_0805_2012Metric_Pad1.20x1.40mm_HandSolder")
+      (reference "R8") (unit 1) (value "10K") (footprint "Resistor_THT:R_Axial_DIN0309_L9.0mm_D3.2mm_P12.70mm_Horizontal")
     )
     (path "/4f70259a-7e96-41a9-9e7d-3bf8781b99e6"
       (reference "R9") (unit 1) (value "10K") (footprint "Resistor_THT:R_Axial_DIN0309_L9.0mm_D3.2mm_P12.70mm_Horizontal")
