@@ -1937,7 +1937,7 @@
       (effects (font (size 1 1) (thickness 0.15)) (justify mirror))
       (tstamp d98663b7-de09-4912-b47a-78d7bf3d529c)
     )
-    (fp_text value "10K" (at 6.35 -2.72 90) (layer "B.Fab")
+    (fp_text value "8.1K" (at 6.35 -2.72 90) (layer "B.Fab")
       (effects (font (size 1 1) (thickness 0.15)) (justify mirror))
       (tstamp 4858770e-ee47-43c2-9be1-11432ff78faa)
     )
