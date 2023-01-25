@@ -2895,11 +2895,11 @@
     (pad "3" smd rect (at -2.91 -2.54 270) (size 1.78 1.02) (layers "B.Cu" "B.Paste" "B.Mask")
       (net 2 "GND") (pinfunction "Pin_3") (pintype "passive") (tstamp bc644eca-1a3f-48f4-8c1f-9687a58ce78f))
     (pad "4" smd rect (at 2.91 2.54 270) (size 1.78 1.02) (layers "B.Cu" "B.Paste" "B.Mask")
-      (net 16 "~{RST_DISP}") (pinfunction "Pin_4") (pintype "passive") (tstamp e22563cd-63d1-425a-8092-18b99234fc12))
+      (net 14 "SCL") (pinfunction "Pin_4") (pintype "passive") (tstamp e22563cd-63d1-425a-8092-18b99234fc12))
     (pad "5" smd rect (at 2.91 0 270) (size 1.78 1.02) (layers "B.Cu" "B.Paste" "B.Mask")
       (net 15 "SDA") (pinfunction "Pin_5") (pintype "passive") (tstamp 757010cc-e34d-4eb0-946a-5b957c8c7bf2))
     (pad "6" smd rect (at 2.91 -2.54 270) (size 1.78 1.02) (layers "B.Cu" "B.Paste" "B.Mask")
-      (net 14 "SCL") (pinfunction "Pin_6") (pintype "passive") (tstamp 7c5fec19-ac41-4819-af5b-7a7574543714))
+      (net 16 "~{RST_DISP}") (pinfunction "Pin_6") (pintype "passive") (tstamp 7c5fec19-ac41-4819-af5b-7a7574543714))
     (model "${KICAD6_3DMODEL_DIR}/Connector_Harwin.3dshapes/Harwin_M20-7810345_2x03_P2.54mm_Vertical.wrl"
       (offset (xyz 0 0 0))
       (scale (xyz 1 1 1))
