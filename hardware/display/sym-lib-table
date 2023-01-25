@@ -1,0 +1,8 @@
+(sym_lib_table
+  (lib (name "LCDdisplays")(type "KiCad")(uri "${LOCALMOD}/LCDdisplays.kicad_sym")(options "")(descr ""))
+  (lib (name "onsemi-local")(type "KiCad")(uri "${LOCALMOD}/onsemi-local.kicad_sym")(options "")(descr ""))
+  (lib (name "q_nmos_sssgd")(type "KiCad")(uri "${LOCALMOD}/q_nmos_sssgd.kicad_sym")(options "")(descr ""))
+  (lib (name "texas-local")(type "KiCad")(uri "${LOCALMOD}/texas-local.kicad_sym")(options "")(descr ""))
+  (lib (name "diode-local")(type "KiCad")(uri "${LOCALMOD}/diode-local.kicad_sym")(options "")(descr ""))
+  (lib (name "microchip-local")(type "Legacy")(uri "${LOCALMOD}/microchip-local.lib")(options "")(descr ""))
+)

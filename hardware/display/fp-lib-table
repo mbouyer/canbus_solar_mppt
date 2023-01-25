@@ -1,0 +1,4 @@
+(fp_lib_table
+  (lib (name "LCDdisplays.mod")(type "KiCad")(uri "${LOCALMOD}/LCDdisplays.mod.pretty")(options "")(descr ""))
+  (lib (name "harwin")(type "KiCad")(uri "${LOCALMOD}/harwin.pretty")(options "")(descr ""))
+)
