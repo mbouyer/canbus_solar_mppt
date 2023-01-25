@@ -461,8 +461,6 @@
       (xy 160 80)
     ) (layer "Edge.Cuts") (width 0.1) (fill none) (tstamp 98ebb5a5-e314-4c54-a66c-0d84525e0ac3))
 
-  (segment (start 88 127.9625) (end 87.9625 128) (width 0.8) (layer "B.Cu") (net 2) (tstamp 2bda4a72-7b7d-4d8e-8370-45f1e0661ec8))
-  (segment (start 87.9625 132.98) (end 87.8625 133.08) (width 0.8) (layer "B.Cu") (net 2) (tstamp 5851ac08-0e3f-4ab7-bbc2-cd5b87016253))
   (segment (start 87.9625 128) (end 87.9625 132.98) (width 0.8) (layer "B.Cu") (net 2) (tstamp 82c79710-15dd-4d01-ae8b-040d44656b9a))
   (segment (start 130.755 83.745) (end 88 126.5) (width 0.8) (layer "B.Cu") (net 2) (tstamp 89175a47-790c-4b16-86a0-dff50a12e283))
   (segment (start 88 126.5) (end 88 127.9625) (width 0.8) (layer "B.Cu") (net 2) (tstamp bfde6f68-73a3-4387-8e27-9cc1fc15c4ce))
