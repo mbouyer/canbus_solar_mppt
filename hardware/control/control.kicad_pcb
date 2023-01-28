@@ -2981,6 +2981,7 @@
       (xy 50 80)
       (xy 160 80)
     ) (layer "Edge.Cuts") (width 0.1) (fill none) (tstamp 98ebb5a5-e314-4c54-a66c-0d84525e0ac3))
+  (gr_circle (center 92.329 99.314) (end 108.585 99.568) (layer "User.2") (width 0.15) (fill none) (tstamp 860d4c78-cab9-4f33-902d-5c9975d4d03c))
 
   (segment (start 103.505 117.856119) (end 103.505 125.4545) (width 0.6) (layer "F.Cu") (net 1) (tstamp 17fab681-daec-47fe-b905-4beb07f700d3))
   (segment (start 106.7585 125.542) (end 103.5925 125.542) (width 0.6) (layer "F.Cu") (net 1) (tstamp 67bc89f0-f335-4ac4-bf21-c28a587a9345))
