@@ -3030,7 +3030,7 @@
       (effects (font (size 1 1) (thickness 0.15)) (justify mirror))
       (tstamp d6fcd4d0-40a3-4415-99d1-3e9e70482e51)
     )
-    (fp_text value "157k" (at 0 -1.65) (layer "B.Fab")
+    (fp_text value "158k" (at 0 -1.65) (layer "B.Fab")
       (effects (font (size 1 1) (thickness 0.15)) (justify mirror))
       (tstamp c3461e1f-4aaa-4186-9254-92b1cc8dbe45)
     )
