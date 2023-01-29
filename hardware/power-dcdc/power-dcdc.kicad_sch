@@ -4784,7 +4784,7 @@
     (property "Datasheet" "~" (id 3) (at 72.39 35.56 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (property "P/N" "C1206C104K5RACTU" (id 4) (at 72.39 35.56 0)
+    (property "P/N" "C1206C104K5RACTU (M)" (id 4) (at 72.39 35.56 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (pin "1" (uuid 2859c900-47ac-463e-a17d-d93d250eb5d6))
