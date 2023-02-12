@@ -45,7 +45,7 @@
         "silk_text_upright": false,
         "zones": {
           "45_degree_only": false,
-          "min_clearance": 0.21
+          "min_clearance": 0.38999999999999996
         }
       },
       "diff_pair_dimensions": [
@@ -55,7 +55,14 @@
           "width": 0.0
         }
       ],
-      "drc_exclusions": [],
+      "drc_exclusions": [
+        "clearance|143302000|112014000|9a535cba-8cb3-439d-8107-5830a9c3a1d0|1ebdcfa5-779e-4e52-bd94-c8ac307b665c",
+        "clearance|143302000|128778000|594e5ae3-7fa7-4949-83e0-e7270dd2f76f|a9228524-eb20-493c-9b96-4cdcfc5f7334",
+        "clearance|143302000|128778000|594e5ae3-7fa7-4949-83e0-e7270dd2f76f|d140e81c-59ec-47fc-abc2-83ed16c30bd0",
+        "clearance|145842000|105664000|6553fbae-e5d6-4f97-b2c1-73ee4f563e78|cbd018b8-910a-4f77-b443-c6a8e1007400",
+        "clearance|145842000|122428000|febbe0ea-72fe-46b3-9d2b-1b0d67c92b2a|04a913de-8784-4128-bbdb-e3c14d153ac9",
+        "clearance|145842000|122428000|febbe0ea-72fe-46b3-9d2b-1b0d67c92b2a|e9c67e40-2600-42df-9830-51e92b70cd38"
+      ],
       "meta": {
         "version": 2
       },
@@ -103,7 +110,7 @@
         "allow_blind_buried_vias": false,
         "allow_microvias": false,
         "max_error": 0.005,
-        "min_clearance": 0.21,
+        "min_clearance": 0.31,
         "min_copper_edge_clearance": 0.21,
         "min_hole_clearance": 0.25,
         "min_hole_to_hole": 0.25,
