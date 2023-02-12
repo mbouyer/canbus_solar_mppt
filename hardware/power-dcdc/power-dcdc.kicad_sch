@@ -1547,7 +1547,6 @@
     )
   )
 
-
   (junction (at 157.48 73.66) (diameter 0) (color 0 0 0 0)
     (uuid 05b2881e-9a2c-4735-89be-c99f2fb1c497)
   )
@@ -1556,6 +1555,9 @@
   )
   (junction (at 236.22 97.79) (diameter 0) (color 0 0 0 0)
     (uuid 0f8129f1-1a9c-43fd-b1c6-b066db573747)
+  )
+  (junction (at 86.995 114.935) (diameter 0) (color 0 0 0 0)
+    (uuid 114d9842-3164-44f4-b142-f798c510d926)
   )
   (junction (at 255.27 118.11) (diameter 0) (color 0 0 0 0)
     (uuid 11606ecc-93d1-41c0-a20a-79c98c595db2)
@@ -1759,8 +1761,6 @@
     (uuid fe87bcce-3a80-421f-93e7-c4d1deb82749)
   )
 
-  (no_connect (at 86.995 116.84) (uuid 7e0a1056-cb8a-465d-ba7f-4e1f967c7044))
-  (no_connect (at 99.695 114.3) (uuid 7e0a1056-cb8a-465d-ba7f-4e1f967c7045))
   (no_connect (at 66.04 59.69) (uuid f3dd206c-c4ea-49ca-8e15-495a98924bdd))
   (no_connect (at 93.98 57.15) (uuid f3dd206c-c4ea-49ca-8e15-495a98924bde))
 
@@ -2704,6 +2704,10 @@
     (stroke (width 0) (type default) (color 0 0 0 0))
     (uuid cff669a8-e5e1-494a-a9f8-e9c31ac1f2d7)
   )
+  (wire (pts (xy 86.995 114.935) (xy 86.995 116.84))
+    (stroke (width 0) (type default) (color 0 0 0 0))
+    (uuid d0711c26-6d4d-4a20-861a-32ff83aaf453)
+  )
   (wire (pts (xy 196.85 58.42) (xy 196.85 62.23))
     (stroke (width 0) (type default) (color 0 0 0 0))
     (uuid d0f191ad-c2ae-4baa-9d1e-884df25ef6b2)
@@ -2923,6 +2927,10 @@
   (wire (pts (xy 229.87 106.68) (xy 227.33 106.68))
     (stroke (width 0) (type default) (color 0 0 0 0))
     (uuid fa09f5dc-be28-452d-ac7e-d1c7916c29c4)
+  )
+  (wire (pts (xy 99.695 114.3) (xy 101.6 114.3))
+    (stroke (width 0) (type default) (color 0 0 0 0))
+    (uuid fa5f8882-d1f9-4a89-81cd-98b3f096962b)
   )
   (wire (pts (xy 121.92 55.88) (xy 121.92 48.26))
     (stroke (width 0) (type default) (color 0 0 0 0))
@@ -3527,6 +3535,22 @@
       (effects (font (size 1.27 1.27)) hide)
     )
     (pin "1" (uuid ddc45828-aaa5-4604-b601-213e2a334b42))
+  )
+
+  (symbol (lib_id "power:GND") (at 101.6 114.3 90) (unit 1)
+    (in_bom yes) (on_board yes)
+    (uuid 4048d801-a6f5-4b3d-8bcd-751185512828)
+    (property "Reference" "#PWR?" (id 0) (at 107.95 114.3 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (property "Value" "GND" (id 1) (at 105.9942 114.173 0))
+    (property "Footprint" "" (id 2) (at 101.6 114.3 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (property "Datasheet" "" (id 3) (at 101.6 114.3 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "1" (uuid 4b5efa00-3d11-43ee-bf5c-6177f4ccbb16))
   )
 
   (symbol (lib_id "power:GND") (at 81.28 41.91 0) (unit 1)
@@ -5107,6 +5131,9 @@
     )
     (path "/d0316b86-13cf-41da-ae94-6e550ef1990f"
       (reference "#PWR024") (unit 1) (value "GND") (footprint "")
+    )
+    (path "/4048d801-a6f5-4b3d-8bcd-751185512828"
+      (reference "#PWR?") (unit 1) (value "GND") (footprint "")
     )
     (path "/e2f6369a-02b5-4d5b-ba47-235a0926e866"
       (reference "C1") (unit 1) (value "YFF31HC") (footprint "local:C_filter_1206")
