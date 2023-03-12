@@ -278,8 +278,8 @@ i2c_init(void)
 	I2C1CON0 = 0x04; /* On, 7 bits I2C host mode */
 	I2C1CON1 = 0;
 	I2C1CON2 = 0; /* address buffer enabled */
-	I2C1CLK = 2; /* clock = hfintosc  (4000khz) */
-	I2C1BAUD = 3; /* prescale = 4 -> clk = 100Khz */
+	I2C1CLK = 1; /* clock = fosc  (10000khz) */
+	I2C1BAUD = 9; /* prescale = 10 -> clk = 200Khz */
 	I2C1CON0bits.EN = 1;
 }
 
