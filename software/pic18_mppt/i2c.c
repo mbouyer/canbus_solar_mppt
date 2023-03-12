@@ -210,6 +210,79 @@ i2c_writecmd(const uint8_t address, uint8_t reg)
 	return i2c_writereg(address, reg, NULL, 0);
 }                                     
 
+char
+i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size)
+{
+	uint8_t i;
+
+	if (i2c_wait_idle() == 0)
+		return 0;
+
+	/* send register address */
+	I2C1CON0bits.RSEN = 0;
+	I2C1CON1bits.ACKDT = 0;
+	I2C1CON1bits.ACKCNT = 1;
+	I2C1ADB1 = address;
+	I2C1CNTH = 0;
+	I2C1CNTL = size + 1;
+	I2C1TXB = reg;
+	I2C1CON0bits.S = 1;
+	/* setup DMA1 */
+	DMASELECT = 0;
+	DMAnCON0 = 0;
+	DMAnCON1 = 0x03; /* SSTP, source increment, source from RAM */
+	DMAnSSAL = ((uint16_t)data) & 0xff;
+	DMAnSSAH = ((uint16_t)data) >> 8;
+	DMAnSSAU = 0;
+	DMAnSSZL = size;
+	DMAnSSZH = 0;
+	DMAnDSA = &I2C1TXB;
+	DMAnDSZL = 1;
+	DMAnDSZH = 0;
+	DMAnSIRQ = 0x39; /* I2C1TX */
+	DMAnAIRQ = 0;
+
+	I2C_WAIT_TX; /* make sure address was accepted */
+	DMAnCON0 = 0xc0;
+
+	int i2c_wait_count = 0;
+	for (i2c_wait_count = 10000; i2c_wait_count > 0; i2c_wait_count--) {
+		if (DMAnCON0bits.SIRQEN == 0) {
+			break;
+		}
+	}
+	if (i2c_wait_count == 0) {
+		printf("I2C TX DMA timeout\n");
+		printf("SCNT %d CON0 0x%x\n", (int)DMAnSCNT, (int)DMAnCON0);
+		i2c_status();
+		return 0;
+	}
+	return 1;
+}
+
+void
+i2c_init(void)
+{
+	RC4I2C = 0x41; /* I2C fast slew-rate, no pull-up, i2c threshold */
+	RC3I2C = 0x41; /* I2C fast slew-rate, no pull-up, i2c threshold */
+	RC3PPS = 0x37; /* SCL */
+	RC4PPS = 0x38; /* SDA */
+	I2C1SCLPPS = 0x13; /* RC3 */
+	I2C1SDAPPS = 0x14; /* RC4 */
+	ODCONCbits.ODCC3 = 1;
+	ODCONCbits.ODCC4 = 1;
+	LATCbits.LATC3 = 1;
+	LATCbits.LATC4 = 1;
+	TRISCbits.TRISC3 = 0;
+	TRISCbits.TRISC4 = 0;
+	I2C1CON0 = 0x04; /* On, 7 bits I2C host mode */
+	I2C1CON1 = 0;
+	I2C1CON2 = 0; /* address buffer enabled */
+	I2C1CLK = 2; /* clock = hfintosc  (4000khz) */
+	I2C1BAUD = 3; /* prescale = 4 -> clk = 100Khz */
+	I2C1CON0bits.EN = 1;
+}
+
 static void
 i2c_status(void)
 {

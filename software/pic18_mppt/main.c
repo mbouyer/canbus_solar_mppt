@@ -744,7 +744,7 @@ i2c_writecontrol(const char address, uint8_t len)
 static char
 i2c_writedata(const char address, uint8_t len)
 {
-	return i2c_writereg(address, 0x40, &i2c_buf[0], len);
+	return i2c_writereg_dma(address, 0x40, &i2c_buf[0], len);
 }
 
 #define OLED_CTRL(c) \
@@ -808,7 +808,7 @@ main(void)
 	PMD5 = 0xff;
 	PMD6 = 0xf6; /* keep UART1 and I2C */
 	PMD7 = 0xff;
-	PMD8 = 0xff;
+	PMD8 = 0xfe; /* keep DMA1 */
 
 	ANSELC = 0;
 
@@ -837,6 +837,21 @@ main(void)
 
 	/* configure sleep mode: PRI_IDLE */
 	CPUDOZE = 0x80;
+
+	/*
+	 * configure priotities memory access priorities
+	 * ISR > DMA1 > main
+	 */
+	PRLOCK = 0x55;
+	PRLOCK = 0xAA;
+	PRLOCKbits.PRLOCKED = 0;
+	ISRPR = 0;
+	MAINPR = 4;
+	DMA1PR = 3;
+	PRLOCK = 0x55;
+	PRLOCK = 0xAA;
+	PRLOCKbits.PRLOCKED = 1;
+
 
 	softintrs.byte = 0;
 	counter_10hz = 25;
@@ -904,7 +919,7 @@ main(void)
 	PIE0bits.TU16AIE = 1;
 #endif
 
-	I2C_INIT;
+	i2c_init();
 
 	INTCON0bits.GIEH=1;  /* enable high-priority interrupts */   
 	INTCON0bits.GIEL=1; /* enable low-priority interrrupts */   
