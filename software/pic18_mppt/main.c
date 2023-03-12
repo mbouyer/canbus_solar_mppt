@@ -72,19 +72,10 @@ static volatile union softintrs {
 static uint16_t a2d_acc;
 
 #define OLED_ADDR 0x78 // 0b01111000
-#define OLED_CTRL(c) if (i2c_writecontrol(OLED_ADDR, (c)) == 0) { \
-            printf("OL i2c_writecontrol %d fail\n", (c)); \
-	}
-#define OLED_DATA(l) if (i2c_writedata(OLED_ADDR, (l)) == 0) { \
-	    printf("OL i2c_data %ld fail\n", (long)(l)); \
-	}
 #define OLED_DISPLAY_SIZE 1024 /* 128 * 64 / 8 */
 
 // XXX #define OLED_RSTN	LATAbits.LATA4
 #define OLED_RSTN	LATBbits.LATB5
-
-#define I2C_BUFSZ 128
-unsigned char i2c_buf[I2C_BUFSZ];
 
 unsigned char bright;
 
@@ -739,10 +730,15 @@ read_pac_channel(void)
 }
 
 /* i2c OLED specific */
+
+#define I2C_BUFSZ 128
+unsigned char i2c_buf[I2C_BUFSZ];
+unsigned char i2c_pt;
+
 static char
-i2c_writecontrol(const char address, char c)
+i2c_writecontrol(const char address, uint8_t len)
 {
-	return i2c_writereg(address, 0, &c, 1);
+	return i2c_writereg(address, 0, &i2c_buf[0], len);
 }
 
 static char
@@ -750,6 +746,20 @@ i2c_writedata(const char address, uint8_t len)
 {
 	return i2c_writereg(address, 0x40, &i2c_buf[0], len);
 }
+
+#define OLED_CTRL(c) \
+        {i2c_buf[i2c_pt++] = (c);}
+
+#define OLED_CTRL_RESET {i2c_pt = 0;}
+
+#define OLED_CTRL_WRITE if (i2c_writecontrol(OLED_ADDR, (i2c_pt)) == 0) { \
+	    printf("OLED_CTRL %d %ld fail\n", (int)i2c_buf[0], (long)(i2c_pt));\
+	} \
+	OLED_CTRL_RESET
+	
+#define OLED_DATA(l) if (i2c_writedata(OLED_ADDR, (l)) == 0) { \
+	    printf("OLED_DATA %ld fail\n", (long)(l)); \
+	}
 
 int
 main(void)
@@ -931,49 +941,47 @@ main(void)
 	printf(" 1");
 
 	/* command lock */
+	OLED_CTRL_RESET;
 	OLED_CTRL(0xfd); OLED_CTRL(0x12);
+	OLED_CTRL_WRITE;
 	CLRWDT();
 
 	/* display off */
 	OLED_CTRL(0xae);
+	OLED_CTRL_WRITE;
 	CLRWDT();
 
 	/* set freq */
 	OLED_CTRL(0xd5); OLED_CTRL(0xa0);
+	OLED_CTRL_WRITE;
 	CLRWDT();
 	/* set multiplexer */
 	OLED_CTRL(0xa8); OLED_CTRL(0x3f);
+	OLED_CTRL_WRITE;
 	CLRWDT();
+
 	/* display offset */
 	OLED_CTRL(0xd3); OLED_CTRL(0x00);
-	CLRWDT();
 	/* start line */
 	OLED_CTRL(0x40);
-	CLRWDT();
 	/* segment remap */
 	OLED_CTRL(0xa0);
-	CLRWDT();
 	/* com output scan direction */
 	OLED_CTRL(0xc0);
-	CLRWDT();
 	/* com pin hardware config */
 	OLED_CTRL(0xda); OLED_CTRL(0x12);
-	CLRWDT();
 	/* current control */
 	// OLED_CTRL(0x81); OLED_CTRL(0xdf);
 	OLED_CTRL(0x81); OLED_CTRL(bright);
-	CLRWDT();
 	/* pre-charge period */
 	OLED_CTRL(0xd9); OLED_CTRL(0x82);
-	CLRWDT();
 	/* vcomh deselect level */
 	OLED_CTRL(0xdb); OLED_CTRL(0x34);
-	CLRWDT();
 	/* entire display on/off */
 	OLED_CTRL(0xa4);
-	CLRWDT();
 	/* normal/inverse */
 	OLED_CTRL(0xa6);
+	OLED_CTRL_WRITE;
 	CLRWDT();
 	/* clear RAM */
 	OLED_CTRL(0x20); OLED_CTRL(0x00); /* page addressing mode */
@@ -981,6 +989,17 @@ main(void)
 	OLED_CTRL(0x22); OLED_CTRL(0x00); OLED_CTRL(0x07); /*page start/end */
 	OLED_CTRL(0x00); OLED_CTRL(0x10);  /* column start */
 	OLED_CTRL(0xb0); /* page start */
+	OLED_CTRL_WRITE;
+	CLRWDT();
+#if 0
+	i2c_buf[0] = 0x20; i2c_buf[1] = 0x00;
+	i2c_buf[2] = 0x21; i2c_buf[3] = 0x00; i2c_buf[4] = 0x7f; /*column start/end */
+	i2c_buf[5] = 0x22; i2c_buf[6] = 0x00; i2c_buf[7] = 0x07; /*page start/end */
+	i2c_buf[8] = 0x00; i2c_buf[9] = 0x10;  /* column start */
+	i2c_buf[10] = 0xb0; /* page start */
+	i2c_writecontrol_m(OLED_ADDR, 11);
+#endif
+
 	CLRWDT();
 	memset(i2c_buf, 0, I2C_BUFSZ);
 	printf(" buf size %d", (int)I2C_BUFSZ);
@@ -992,7 +1011,9 @@ main(void)
 		CLRWDT();
 	}
 	/* set display on */
+	OLED_CTRL_RESET
 	OLED_CTRL(0xaf);
+	OLED_CTRL_WRITE;
 	CLRWDT();
 	printf(" done\n");
 
