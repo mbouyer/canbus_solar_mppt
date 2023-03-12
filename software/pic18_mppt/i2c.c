@@ -240,10 +240,11 @@ i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size
 	DMAnDSZL = 1;
 	DMAnDSZH = 0;
 	DMAnSIRQ = 0x39; /* I2C1TX */
+	DMAnAIRQ = 0x3b; /* I2C1E */
 	DMAnAIRQ = 0;
 
 	I2C_WAIT_TX; /* make sure address was accepted */
-	DMAnCON0 = 0xc0;
+	DMAnCON0 = 0xc4; /* enable, hardware IRQ trigger/abort */
 
 	int i2c_wait_count = 0;
 	for (i2c_wait_count = 10000; i2c_wait_count > 0; i2c_wait_count--) {
@@ -251,9 +252,9 @@ i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size
 			break;
 		}
 	}
-	if (i2c_wait_count == 0) {
+	if (i2c_wait_count == 0 || PIR2bits.DMA1AIF) {
 		printf("I2C TX DMA timeout\n");
-		printf("SCNT %d CON0 0x%x\n", (int)DMAnSCNT, (int)DMAnCON0);
+		printf("SCNT %d CON0 0x%x PIR2 0x%x\n", (int)DMAnSCNT, (int)DMAnCON0, (int)PIR2);
 		i2c_status();
 		return 0;
 	}
@@ -280,6 +281,7 @@ i2c_init(void)
 	I2C1CON2 = 0; /* address buffer enabled */
 	I2C1CLK = 1; /* clock = fosc  (10000khz) */
 	I2C1BAUD = 9; /* prescale = 10 -> clk = 200Khz */
+	I2C1ERR = 0x01; /* enable NACK interrupt */
 	I2C1CON0bits.EN = 1;
 }
 
