@@ -37,6 +37,8 @@
 #include "i2c.h"
 #include "ntc_tab.h"
 #include "pac195x.h"
+#include "font5x8.h"
+#include "font10x16.h"
 
 unsigned int devid, revid; 
 
@@ -73,6 +75,14 @@ static uint16_t a2d_acc;
 
 #define OLED_ADDR 0x78 // 0b01111000
 #define OLED_DISPLAY_SIZE 1024 /* 128 * 64 / 8 */
+#define OLED_DISPLAY_W 128
+#define OLED_DISPLAY_H (64 / 8)
+
+#define DISPLAY_FONTSMALL_W     6
+
+char oled_displaybuf[OLED_DISPLAY_W / DISPLAY_FONTSMALL_W];
+static unsigned char oled_col;
+static unsigned char oled_line;
 
 // XXX #define OLED_RSTN	LATAbits.LATA4
 #define OLED_RSTN	LATBbits.LATB5
@@ -761,6 +771,30 @@ i2c_writedata(const char address, uint8_t len)
 	    printf("OLED_DATA %ld fail\n", (long)(l)); \
 	}
 
+static void displaybuf_small(void)
+{
+	const unsigned char *font;
+	char *cp;
+	unsigned char i;
+
+	OLED_CTRL_RESET;
+	/* set column address */
+	OLED_CTRL(oled_col & 0x0f); OLED_CTRL(0x10 | (oled_col >> 4));
+	/* set page address */
+	OLED_CTRL((oled_line & 0x07 ) | 0xb0 );
+	OLED_CTRL_WRITE;
+
+	i2c_pt = 0;
+	for (cp = oled_displaybuf; *cp != '\0'; cp++) {
+		font = get_font5x8(*cp);
+		for (i = 0; i < 5; i++) {
+			i2c_buf[i2c_pt++] = font[i];
+		}
+	}
+	OLED_DATA(i2c_pt);
+}
+
+
 int
 main(void)
 {
@@ -1163,6 +1197,11 @@ again:
 	if (c != 0)
 		goto again;
 #endif /* USEPAC */
+
+	oled_col = 40;
+	oled_line = 4;
+	sprintf(oled_displaybuf, "hello");
+	displaybuf_small();
 
 	while (1) {
 		CLRWDT();
