@@ -38,19 +38,6 @@
 
 static void i2c_status(void);
 
-#define I2C_WAIT_RX { \
-	int i2c_wait_count = 0; \
-	while (!I2C1STAT1bits.RXBF) { \
-		i2c_wait_count++; \
-		if (i2c_wait_count == 30000) { \
-			printf(("I2C RX timeout\n")); \
-			i2c_status(); \
-			for (i2c_wait_count = 0; i2c_wait_count < 512; i2c_wait_count++) ; \
-			return 0; __asm__("reset"); \
-		} \
-	} \
-    }
-
 #define I2C_WAIT_TX { \
 	int i2c_wait_count = 0; \
 	while (!I2C1STAT1bits.TXBE) { \
@@ -59,7 +46,8 @@ static void i2c_status(void);
 			printf("I2C@%d TX timeout\n", (int)address); \
 			i2c_status(); \
 			i2c_wait_idle(); \
-			return 0; \
+			*r = I2C_ERROR; \
+			return; \
 		} \
 	} \
     }
@@ -85,8 +73,8 @@ i2c_wait_idle(void)
 	return 1;
 }
 
-static char
-i2c_readreg_s(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, uint8_t swap)
+static void
+i2c_readreg_s(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, uint8_t swap, i2c_return_t *r)
 {
 	*data = 0;
 	uint8_t i;
@@ -97,10 +85,15 @@ again:
 	if (retry_count-- == 0) {
 		printf("i2c read: retry == 0 ");
 		i2c_status();
-		return 0;
+		*r= I2C_ERROR;
+		return;
 	}
-	if (i2c_wait_idle() == 0)
-		return 0;
+	if (i2c_wait_idle() == 0) {
+		*r= I2C_ERROR;
+		return;
+	}
+	*r= I2C_INPROGRESS;
+
 	I2C1STAT1bits.CLRBF = 1;
 	I2C1STAT1 = 0;
 	I2C1PIR = 0;
@@ -151,26 +144,34 @@ again:
 			data[size - i] = I2C1RXB;
 		}
 	}
-	return (size - i);
+	*r= I2C_COMPLETE;
 }
 
-char
-i2c_readreg(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size) {
-	return i2c_readreg_s(address, reg, data, size, 0);
+void
+i2c_readreg(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size,
+    i2c_return_t *r) {
+	i2c_readreg_s(address, reg, data, size, 0, r);
 }
 
-char
-i2c_readreg_be(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size) {
-	return i2c_readreg_s(address, reg, data, size, 1);
+void
+i2c_readreg_be(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size,
+    i2c_return_t *r) {
+	return i2c_readreg_s(address, reg, data, size, 1, r);
 }
 
-static char
-i2c_writereg_s(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, uint8_t swap)
+static void
+i2c_writereg_s(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size,
+    uint8_t swap, i2c_return_t *r)
 {
 	uint8_t i;
 
-	if (i2c_wait_idle() == 0)
-		return 0;
+
+	if (i2c_wait_idle() == 0) {
+		*r = I2C_ERROR;
+		return;
+	}
+
+	*r = I2C_INPROGRESS;
 
 	I2C1STAT1bits.CLRBF = 1;
 	I2C1STAT1 = 0;
@@ -192,35 +193,41 @@ i2c_writereg_s(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, 
 			I2C1TXB = data[size - i];
 		}
 	}
-	return 1;
+	*r = I2C_COMPLETE;
 }
 
-char
-i2c_writereg(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size)
+void
+i2c_writereg(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size,
+    i2c_return_t *r)
 {
-	return i2c_writereg_s(address, reg, data, size, 0);
+	i2c_writereg_s(address, reg, data, size, 0, r);
 }
 
-char
-i2c_writereg_be(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size)
+void
+i2c_writereg_be(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size,
+    i2c_return_t *r)
 {
-	return i2c_writereg_s(address, reg, data, size, 1);
+	i2c_writereg_s(address, reg, data, size, 1, r);
 }
 
-char
-i2c_writecmd(const uint8_t address, uint8_t reg)                              
+void
+i2c_writecmd(const uint8_t address, uint8_t reg, i2c_return_t *r)
 {
-	return i2c_writereg(address, reg, NULL, 0);
+	i2c_writereg(address, reg, NULL, 0, r);
 }                                     
 
-char
-i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size)
+void
+i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data,
+    uint8_t size, i2c_return_t *r)
 {
 	uint8_t i;
 
-	if (i2c_wait_idle() == 0)
-		return 0;
+	if (i2c_wait_idle() == 0) {
+		*r = I2C_ERROR;
+		return;
+	}
 
+	*r = I2C_INPROGRESS;
 	I2C1STAT1bits.CLRBF = 1;
 	I2C1STAT1 = 0;
 
@@ -262,9 +269,11 @@ i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size
 		printf("I2C@%d TX DMA timeout\n", (int)address);
 		printf("SCNT %d CON0 0x%x PIR2 0x%x\n", (int)DMAnSCNT, (int)DMAnCON0, (int)PIR2);
 		i2c_status();
-		return 0;
+		*r = I2C_ERROR;
+		return;
 	}
-	return 1;
+	*r = I2C_COMPLETE;
+	return;
 }
 
 void

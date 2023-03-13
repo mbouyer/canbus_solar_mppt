@@ -86,6 +86,8 @@ unsigned char bright;
 #define PAC_I2C_ADDR 0x2e
 #define NDOWN LATCbits.LATC7
 
+static volatile i2c_return_t pac_i2c_return;
+
 int16_t batt_v[4];
 int16_t batt_i[4];
 uint16_t batt_temp[4];
@@ -684,8 +686,9 @@ read_pac_channel(void)
 	int64_t acc_value;
 	double v;
 
-	if (i2c_readreg_be(PAC_I2C_ADDR, PAC_ACCCNT,
-	    &pac_acccnt, sizeof(pac_acccnt)) != sizeof(pac_acccnt)) {
+	i2c_readreg_be(PAC_I2C_ADDR, PAC_ACCCNT,
+	    &pac_acccnt, sizeof(pac_acccnt), &pac_i2c_return);
+	if (i2c_wait(&pac_i2c_return) != 0) {
 		printf("read pac_acccnt fail\n");
 		pac_acccnt.acccnt_count = 0;
 		return;
@@ -698,8 +701,9 @@ read_pac_channel(void)
 			continue;
 
 		acc_value = 0;
-		if (i2c_readreg_be(PAC_I2C_ADDR, PAC_ACCV1 + c,
-		    &acc_value, 7) != 7) {
+		i2c_readreg_be(PAC_I2C_ADDR, PAC_ACCV1 + c,
+		    &acc_value, 7, &pac_i2c_return);
+		if (i2c_wait(&pac_i2c_return) != 0) {
 			printf("read acc_value[%d] fail\n", c);
 			continue;
 		}
@@ -739,16 +743,20 @@ read_pac_channel(void)
 unsigned char i2c_buf[I2C_BUFSZ];
 unsigned char i2c_pt;
 
+static volatile i2c_return_t oled_i2c_return;
+
 static char
 i2c_writecontrol(const char address, uint8_t len)
 {
-	return i2c_writereg(address, 0, &i2c_buf[0], len);
+	i2c_writereg(address, 0, &i2c_buf[0], len, &oled_i2c_return);
+	return i2c_wait(&oled_i2c_return);
 }
 
 static char
 i2c_writedata(const char address, uint8_t len)
 {
-	return i2c_writereg_dma(address, 0x40, &i2c_buf[0], len);
+	i2c_writereg_dma(address, 0x40, &i2c_buf[0], len, &oled_i2c_return);
+	return i2c_wait(&oled_i2c_return);
 }
 
 #define OLED_CTRL(c) \
@@ -756,16 +764,17 @@ i2c_writedata(const char address, uint8_t len)
 
 #define OLED_CTRL_RESET {i2c_pt = 0;}
 
-#define OLED_CTRL_WRITE if (i2c_writecontrol(OLED_ADDR, (i2c_pt)) == 0) { \
+#define OLED_CTRL_WRITE if (i2c_writecontrol(OLED_ADDR, (i2c_pt)) != 0) { \
 	    printf("OLED_CTRL %d %ld fail\n", (int)i2c_buf[0], (long)(i2c_pt));\
 	} \
 	OLED_CTRL_RESET
 	
-#define OLED_DATA(l) if (i2c_writedata(OLED_ADDR, (l)) == 0) { \
+#define OLED_DATA(l) if (i2c_writedata(OLED_ADDR, (l)) != 0) { \
 	    printf("OLED_DATA %ld fail\n", (long)(l)); \
 	}
 
-static void displaybuf_small(void)
+static void
+displaybuf_small(void)
 {
 	const unsigned char *font;
 	char *cp;
@@ -1122,24 +1131,27 @@ main(void)
 
 again:
 	c = 0;
-	if (i2c_readreg(PAC_I2C_ADDR, PAC_PRODUCT, &i2cr, 1) != 1)
+	i2c_readreg(PAC_I2C_ADDR, PAC_PRODUCT, &i2cr, 1, &pac_i2c_return);
+	if (i2c_wait(&pac_i2c_return) != 0)
 		c++;
 	else 
 		printf("product id 0x%x ", i2cr);
 
-	if (i2c_readreg(PAC_I2C_ADDR, PAC_MANUF, &i2cr, 1) != 1)
+	i2c_readreg(PAC_I2C_ADDR, PAC_MANUF, &i2cr, 1, &pac_i2c_return);
+	if (i2c_wait(&pac_i2c_return) != 0)
 		c++;
 	else
 		printf("manuf id 0x%x ", i2cr);
 
-	if (i2c_readreg(PAC_I2C_ADDR, PAC_REV, &i2cr, 1) != 1)
+	i2c_readreg(PAC_I2C_ADDR, PAC_REV, &i2cr, 1, &pac_i2c_return);
+	if (i2c_wait(&pac_i2c_return) != 0)
 		c++;
 	else
 		printf("rev id 0x%x\n", i2cr);
 
-	if (i2c_readreg(PAC_I2C_ADDR,
-	    PAC_CTRL_ACT, (uint8_t *)&pac_ctrl, sizeof(pac_ctrl)) !=
-	    sizeof(pac_ctrl))
+	i2c_readreg(PAC_I2C_ADDR, PAC_CTRL_ACT,
+	    (uint8_t *)&pac_ctrl, sizeof(pac_ctrl), &pac_i2c_return);
+	if (i2c_wait(&pac_i2c_return) != 0)
 		c++;
 	else {
 		printf("CTRL_ACT al1 %d al2 %d mode %d dis %d\n",

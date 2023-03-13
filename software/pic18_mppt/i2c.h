@@ -25,11 +25,29 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+typedef __volatile enum {
+	I2C_INPROGRESS = 0,
+	I2C_COMPLETE,
+	I2C_ERROR
+} i2c_return_t;
+
 void i2c_init(void);
 
-char i2c_readreg(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size);
-char i2c_readreg_be(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size);
-char i2c_writereg(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size);
-char i2c_writereg_be(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size);
-char i2c_writecmd(const uint8_t address, uint8_t reg);
-char i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size);
+void i2c_readreg(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, i2c_return_t *r);
+void i2c_readreg_be(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, i2c_return_t *r);
+void i2c_writereg(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, i2c_return_t *r);
+void i2c_writereg_be(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, i2c_return_t *r);
+void i2c_writecmd(const uint8_t address, uint8_t reg, i2c_return_t *r);
+void i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, i2c_return_t *r);
+
+static char
+i2c_wait(volatile i2c_return_t *r)
+{
+	while (*r == I2C_INPROGRESS) {
+		CLRWDT();
+		SLEEP();
+	};
+	if (*r == I2C_COMPLETE)
+		return 0;
+	return 1;
+}
