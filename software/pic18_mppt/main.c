@@ -56,11 +56,6 @@ unsigned int timer0_read(void);
 
 #define NCANOK PORTCbits.RC2
 
-// XXX debug
-#define LEDBATT_R LATCbits.LATC0
-#define LEDBATT_G LATCbits.LATC1
-
-
 static char counter_10hz;
 static char counter_1hz;
 static uint16_t seconds;
@@ -84,8 +79,7 @@ char oled_displaybuf[OLED_DISPLAY_W / DISPLAY_FONTSMALL_W];
 static unsigned char oled_col;
 static unsigned char oled_line;
 
-// XXX #define OLED_RSTN	LATAbits.LATA4
-#define OLED_RSTN	LATBbits.LATB5
+#define OLED_RSTN	LATAbits.LATA4
 
 unsigned char bright;
 
@@ -859,11 +853,7 @@ main(void)
 	OLED_RSTN = 0;
 	NDOWN = 0;
 	TRISAbits.TRISA4 = 0; /* RA4/OLED_RSTN as outpout */
-	TRISBbits.TRISB5 = 0; /* RB5/OLED_RSTN as outpout XXX */
-	TRISCbits.TRISC0 = TRISCbits.TRISC1 = 0; /* RC0/RC1 as outpout XXX LED */
 	TRISCbits.TRISC7 = 0; /* RC7/NDOWN output */
-	LEDBATT_R = 1;
-	LEDBATT_G = 0;
 
 	/* configure watchdog timer for 2s */
 	WDTCON0 = 0x16;
