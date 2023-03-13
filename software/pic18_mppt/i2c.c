@@ -56,10 +56,10 @@ static void i2c_status(void);
 	while (!I2C1STAT1bits.TXBE) { \
 		i2c_wait_count++; \
 		if (i2c_wait_count == 30000) { \
-			printf("I2C TX timeout\n"); \
+			printf("I2C@%d TX timeout\n", (int)address); \
 			i2c_status(); \
-			for (i2c_wait_count = 0; i2c_wait_count < 512; i2c_wait_count++) ; \
-			return 0; __asm__("reset"); \
+			i2c_wait_idle(); \
+			return 0; \
 		} \
 	} \
     }
@@ -172,6 +172,9 @@ i2c_writereg_s(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, 
 	if (i2c_wait_idle() == 0)
 		return 0;
 
+	I2C1STAT1bits.CLRBF = 1;
+	I2C1STAT1 = 0;
+
 	/* send register address */
 	I2C1CON0bits.RSEN = 0;
 	I2C1CON1bits.ACKDT = 0;
@@ -218,6 +221,9 @@ i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size
 	if (i2c_wait_idle() == 0)
 		return 0;
 
+	I2C1STAT1bits.CLRBF = 1;
+	I2C1STAT1 = 0;
+
 	/* send register address */
 	I2C1CON0bits.RSEN = 0;
 	I2C1CON1bits.ACKDT = 0;
@@ -253,7 +259,7 @@ i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size
 		}
 	}
 	if (i2c_wait_count == 0 || PIR2bits.DMA1AIF) {
-		printf("I2C TX DMA timeout\n");
+		printf("I2C@%d TX DMA timeout\n", (int)address);
 		printf("SCNT %d CON0 0x%x PIR2 0x%x\n", (int)DMAnSCNT, (int)DMAnCON0, (int)PIR2);
 		i2c_status();
 		return 0;
