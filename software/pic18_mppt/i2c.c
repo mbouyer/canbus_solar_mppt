@@ -36,7 +36,38 @@
 #define DPRINTF(x) /**/
 #endif
 
-static void i2c_status(void);
+typedef volatile enum {
+	I2C_IDLE = 0,
+	I2C_TX,
+	I2C_RX,
+	I2C_TXDMA,
+	I2C_RXDMA,
+} i2c_status_t;
+
+static i2c_status_t i2c_status;
+static i2c_return_t *i2c_return;
+static uint8_t *i2c_data;
+static __bit i2c_swap;
+
+static void i2c_printstatus(void);
+
+#define I2C_IRQDIS \
+	{ \
+		I2C1ERRbits.NACKIE = 0; \
+		I2C1PIEbits.CNTIE = 0; \
+		PIE7bits.I2C1TXIE = 0; \
+		PIE7bits.I2C1RXIE = 0; \
+		PIE7bits.I2C1IE = 0; \
+		PIE7bits.I2C1EIE = 0; \
+	}
+
+#define I2C_IRQEN \
+	{ \
+		I2C1ERRbits.NACKIE = 1; \
+		I2C1PIEbits.CNTIE = 1; \
+		PIE7bits.I2C1IE = 1; \
+		PIE7bits.I2C1EIE = 1; \
+	}
 
 #define I2C_WAIT_TX { \
 	int i2c_wait_count = 0; \
@@ -44,7 +75,7 @@ static void i2c_status(void);
 		i2c_wait_count++; \
 		if (i2c_wait_count == 30000) { \
 			printf("I2C@%d TX timeout\n", (int)address); \
-			i2c_status(); \
+			i2c_printstatus(); \
 			i2c_wait_idle(); \
 			*r = I2C_ERROR; \
 			return; \
@@ -62,7 +93,7 @@ i2c_wait_idle(void)
 		if (i2c_wait_count == 10000) {
 			if (tries > 0 || I2C1CON1bits.P) {
 				printf(("I2C idle timeout\n"));
-				i2c_status();
+				i2c_printstatus();
 				return 0;
 			}
 			I2C1CON1bits.P = 1;
@@ -84,7 +115,7 @@ i2c_readreg_s(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, u
 again:
 	if (retry_count-- == 0) {
 		printf("i2c read: retry == 0 ");
-		i2c_status();
+		i2c_printstatus();
 		*r= I2C_ERROR;
 		return;
 	}
@@ -100,7 +131,6 @@ again:
 	I2C1ERR = 0;
 
 	/* send register address */
-	I2C1PIR = 0;
 	I2C1CON0bits.RSEN = 1;
 	I2C1CON1bits.ACKDT = 0;
 	I2C1CON1bits.ACKCNT = 0;
@@ -133,7 +163,7 @@ again:
 		}
 		if (i2c_wait_count == 0) {
 			printf("I2C RX timeout: ");
-			i2c_status();
+			i2c_printstatus();
 			I2C1STAT1 = 0;
 			I2C1ERR = 0;
 			goto again;
@@ -175,6 +205,8 @@ i2c_writereg_s(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size,
 
 	I2C1STAT1bits.CLRBF = 1;
 	I2C1STAT1 = 0;
+	I2C1PIR = 0;
+	I2C1ERR = 0;
 
 	/* send register address */
 	I2C1CON0bits.RSEN = 0;
@@ -185,15 +217,17 @@ i2c_writereg_s(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size,
 	I2C1CNTL = size + 1;
 	I2C1TXB = reg;
 	I2C1CON0bits.S = 1;
-	for (i = size ; i != 0; i--) {
-		I2C_WAIT_TX;
-		if (swap) {
-			I2C1TXB = data[i - 1];
-		} else {
-			I2C1TXB = data[size - i];
-		}
+	if (swap) {
+		i2c_data = &data[size - 1];
+		i2c_swap = 1;
+	} else {
+		i2c_data = &data[0];
+		i2c_swap = 0;
 	}
-	*r = I2C_COMPLETE;
+	i2c_status = I2C_TX;
+	i2c_return = r;
+	I2C_IRQEN;
+	PIE7bits.I2C1TXIE = 1;
 }
 
 void
@@ -230,6 +264,9 @@ i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data,
 	*r = I2C_INPROGRESS;
 	I2C1STAT1bits.CLRBF = 1;
 	I2C1STAT1 = 0;
+	I2C1PIR = 0;
+	I2C1ERR = 0;
+	PIR2 &= 0x0f;
 
 	/* send register address */
 	I2C1CON0bits.RSEN = 0;
@@ -259,21 +296,61 @@ i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data,
 	I2C_WAIT_TX; /* make sure address was accepted */
 	DMAnCON0 = 0xc4; /* enable, hardware IRQ trigger/abort */
 
-	int i2c_wait_count = 0;
-	for (i2c_wait_count = 10000; i2c_wait_count > 0; i2c_wait_count--) {
-		if (DMAnCON0bits.SIRQEN == 0) {
-			break;
-		}
-	}
-	if (i2c_wait_count == 0 || PIR2bits.DMA1AIF) {
-		printf("I2C@%d TX DMA timeout\n", (int)address);
+	i2c_status = I2C_TXDMA;
+	i2c_return = r;
+	I2C_IRQEN;
+
+#if 0
+	i = i2c_wait(i2c_return);
+	if (*i2c_return != I2C_COMPLETE || PIR2bits.DMA1AIF) {
+		printf(" %d I2C@%d TX DMA timeout\n", *r, (int)address);
 		printf("SCNT %d CON0 0x%x PIR2 0x%x\n", (int)DMAnSCNT, (int)DMAnCON0, (int)PIR2);
-		i2c_status();
-		*r = I2C_ERROR;
-		return;
+		i2c_printstatus();
 	}
-	*r = I2C_COMPLETE;
+#endif
 	return;
+}
+
+void __interrupt(__irq(I2C1TX), __low_priority, base(IVECT_BASE))
+irql_i2c1tx(void)
+{
+	I2C1TXB = *i2c_data;
+	if (i2c_swap)
+		i2c_data--;
+	else
+		i2c_data++;
+}
+
+void __interrupt(__irq(I2C1RX), __low_priority, base(IVECT_BASE))
+irql_i2c1rx(void)
+{
+	I2C1RXB = *i2c_data;
+	if (i2c_swap)
+		i2c_data--;
+	else
+		i2c_data++;
+}
+
+void __interrupt(__irq(I2C1), __low_priority, base(IVECT_BASE))
+irql_i2c1(void)
+{
+	if (I2C1PIRbits.CNTIF) {
+		I2C_IRQDIS;
+		*i2c_return = I2C_COMPLETE;
+		i2c_status = I2C_IDLE;
+	}
+}
+
+void __interrupt(__irq(I2C1E), __low_priority, base(IVECT_BASE))
+irql_i2c1error(void)
+{
+	if (I2C1ERRbits.NACKIF) {
+		I2C_IRQDIS;
+		if (I2C1STAT0bits.MMA)
+			I2C1CON1bits.P = 1;
+		*i2c_return = I2C_ERROR;
+		i2c_status = I2C_IDLE;
+	}
 }
 
 void
@@ -298,12 +375,14 @@ i2c_init(void)
 	I2C1BAUD = 9; /* prescale = 10 -> clk = 200Khz */
 	I2C1ERR = 0x01; /* enable NACK interrupt */
 	I2C1CON0bits.EN = 1;
+
+	i2c_status = I2C_IDLE;
 }
 
 static void
-i2c_status(void)
+i2c_printstatus(void)
 {
-	printf("CON 0x%x 0x%x 0x%x", I2C1CON0, I2C1CON1, I2C1CON2);
-	printf(" STAT 0x%x 0x%x PIR 0x%x", I2C1STAT0, I2C1STAT1, I2C1PIR);
-	printf(" ERR 0x%x CNT 0x%x 0x%x\n", I2C1ERR, I2C1CNTH, I2C1CNTL);
+	printf("%d CON 0x%x 0x%x 0x%x", i2c_status, I2C1CON0, I2C1CON1, I2C1CON2);
+	printf("  STAT 0x%x 0x%x PIR 0x%x", I2C1STAT0, I2C1STAT1, I2C1PIR);
+	printf("  ERR 0x%x CNT 0x%x 0x%x\n", I2C1ERR, I2C1CNTH, I2C1CNTL);
 }
