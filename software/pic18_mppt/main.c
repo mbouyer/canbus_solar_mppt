@@ -62,6 +62,9 @@ static uint16_t seconds;
 static volatile union softintrs {
 	struct softintrs_bits {
 		char int_10hz : 1;	/* 0.1s timer */
+		char int_btn_down : 1;	/* button release->press */
+		char int_btn_up : 1;	/* button press->release */
+		char int_adcc : 1;	/* A/D convertion complete */
 	} bits;
 	char byte;
 } softintrs;
@@ -87,6 +90,16 @@ unsigned char bright;
 #define NDOWN LATCbits.LATC7
 
 static volatile i2c_return_t pac_i2c_return;
+
+static enum {
+	BTN_IDLE = 0,
+	BTN_DOWN,
+	BTN_DOWN_1,
+	BTN_DOWN_1_P,
+	BTN_DOWN_2,
+	BTN_DOWN_2_P,
+	BTN_UP
+} btn_state;
 
 int16_t batt_v[4];
 int16_t batt_i[4];
@@ -832,7 +845,7 @@ main(void)
 	asm("movff TABLAT, _devid + 1;");
 
 	/* disable unused modules */
-	PMD0 = 0x7a; /* keep clock and IOC */
+	PMD0 = 0x3a; /* keep clock, FVR,  and IOC */
 #ifdef USE_TIMER2
 	PMD1 = 0xfa; /* keep timer0/timer2 */
 	PMD2 = 0x03; /* keep can module */
@@ -840,7 +853,7 @@ main(void)
 	PMD1 = 0xfe; /* keep timer0 */
 	PMD2 = 0x02; /* keep can module, TU16A */
 #endif
-	PMD3 = 0xdf; /* keep ADC */
+	PMD3 = 0xdd; /* keep ADC, CM1 */
 	PMD4 = 0xff;
 	PMD5 = 0xff;
 	PMD6 = 0xf6; /* keep UART1 and I2C */
@@ -857,7 +870,7 @@ main(void)
 	TRISBbits.TRISB2 = 0;
 	RB2PPS = 0x46;
 
-	ANSELA = 0x2e; /* RA1, RA2, RA3 and RA5 analog */
+	ANSELA = 0x2F; /* RA0, RA1, RA2, RA3 and RA5 analog */
 	LATA = 0;
 	OLED_RSTN = 0;
 	NDOWN = 0;
@@ -967,17 +980,50 @@ main(void)
 	WDTCON0bits.SEN = 1;
 
 	/* set up ADC */
-	PIR1bits.ADIF = 0;
 	ADCON0 = 0x4; /* right-justified */
+	ADCLK = 7; /* Fosc/16 */
+	/* context 0: PWM_v */
+	ADCTX = 0;
+	ADCON1 = 0; /* no cap */
+	ADCON2 = 0; /* basic mode */
+	ADCON3 = 0x80; /* SOI */
+	ADREF = 2;  /* vref = vref+ (RA3) */
+	ADPCH = 0; /* RA0 */
+	ADACQH = 0;
+	ADACQL = 20; /* 20Tad Aq */
+	/* context 1: solar_v */
+	ADCTX = 1;
+	ADCON1 = 0; /* no cap */
+	ADCON2 = 0; /* basic mode */
+	ADCON3 = 0x80; /* SOI */
+	ADREF = 2;  /* vref = vref+ (RA3) */
+	ADPCH = 2; /* RA2 */
+	ADACQH = 0;
+	ADACQL = 20; /* 20Tad Aq */
+	/* XXX setup thresholds */
+	/* context 2: NTC */
+	ADCTX = 2;
+	ADCON1 = 0; /* no cap */
+	ADCON2 = 0; /* basic mode */
+	ADCON3 = 0x80; /* SOI */
+	ADREF = 0;  /* vref = VDD */
+	ADPCH = 5; /* RA5 */
+	ADACQH = 0;
+	ADACQL = 20; /* 20Tad Aq */
+	/* XXX setup thresholds */
+	/* context 3: buttons */
+	ADCTX = 3;
 	ADCON1 = 0; /* no cap */
 	ADCON2 = 0; /* basic mode */
 	ADCON3 = 0; /* basic mode */
-	ADCLK = 7; /* Fosc/16 */
 	ADREF = 0;  /* vref = VDD */
-	ADPCH = 0; /* channel 0 */
+	ADPCH = 1; /* RA1 */
 	ADACQH = 0;
 	ADACQL = 20; /* 20Tad Aq */
-	// USEADC ADCON0bits.ADON = 1;
+
+	ADCON0bits.ADON = 1;
+	PIR1bits.ADIF = 0;
+	PIE1bits.ADIE = 0;
 
 	printf("display init");
 	/* setup OLED */
@@ -1205,6 +1251,18 @@ again:
 	sprintf(oled_displaybuf, "hello");
 	displaybuf_small();
 
+	btn_state = BTN_IDLE;
+
+	FVRCON = 0x8c; /* FVR on, CDAFVR 4.096v */
+
+	CM1CON0 = 0x42; /* invert polarity, hysteresis */
+	CM1CON1 = 0x03; /* interrupt on both edges */
+	CM1NCH = 0x01; /* CH1IN1- */
+	CM1PCH = 0x06; /* FVR */
+	CM1CON0bits.EN = 1;
+	PIR1bits.C1IF = 0; /* clear any pending interrupt */
+	PIE1bits.C1IE = 1; /* enable */
+
 	while (1) {
 		CLRWDT();
 		if (C1INTLbits.RXIF) {
@@ -1226,6 +1284,7 @@ again:
 				printf("new addr %d\n", nmea2000_addr);
 			}
 		}
+
 #ifdef USEADC
 		if (PIR1bits.ADIF) {
 			PIR1bits.ADIF = 0;
@@ -1257,6 +1316,79 @@ again:
 			}
 		}
 #endif
+
+		if (softintrs.bits.int_btn_down) {
+			softintrs.bits.int_btn_down = 0;
+			btn_state = BTN_DOWN;
+			/* get btn value */
+			/* XXX context */
+			ADCTX = 3;
+			PIR1bits.ADIF = 0;
+			PIE1bits.ADIE = 1;
+			ADCON0bits.ADON = 1;
+
+		}
+		if (softintrs.bits.int_btn_up) {
+			softintrs.bits.int_btn_up = 0;
+			switch(btn_state) {
+			case BTN_DOWN_1:
+			case BTN_DOWN_1_P:
+			case BTN_DOWN_2:
+			case BTN_DOWN_2_P:
+				/* this is a up event */
+				btn_state = BTN_UP;
+				break;
+			default:
+				/* transient event */
+				btn_state = BTN_IDLE;
+				break;
+			}
+		}
+		if (softintrs.bits.int_adcc) {
+			if (btn_state == BTN_DOWN) {
+				if (ADRES > 0x600 && ADRES < 0x900) {
+					btn_state = BTN_DOWN_2;
+				} else if (ADRES > 0x400 && ADRES < 0x600) {
+					btn_state = BTN_DOWN_1;
+				} else {
+					/* transient event */
+					btn_state = BTN_IDLE;
+				}
+			} else {
+				btn_state = BTN_IDLE;
+			}
+			// printf("ADC complete 0x%x\n", ADRES);
+			softintrs.bits.int_adcc = 0;
+			PIR1bits.ADIF = 0;
+			PIE1bits.ADIE = 0;
+		}
+
+		switch (btn_state) {
+		case BTN_DOWN_1:
+			oled_col = 40;
+			oled_line = 4;
+			sprintf(oled_displaybuf, "  B1 ");
+			displaybuf_small();
+			printf("B1\n");
+			btn_state = BTN_DOWN_1_P;
+			break;
+		case BTN_DOWN_2:
+			oled_col = 40;
+			oled_line = 4;
+			sprintf(oled_displaybuf, "  B2 ");
+			displaybuf_small();
+			printf("B2\n");
+			btn_state = BTN_DOWN_2_P;
+			break;
+		case BTN_UP:
+			oled_col = 40;
+			oled_line = 4;
+			sprintf(oled_displaybuf, "  up ");
+			displaybuf_small();
+			printf("up\n");
+			btn_state = BTN_IDLE;
+			break;
+		}
 
 		if (softintrs.bits.int_10hz) {
 			softintrs.bits.int_10hz = 0;
@@ -1388,3 +1520,20 @@ irqh_tu16a(void)
 	softintrs.bits.int_10hz = 1;
 }
 #endif
+
+void __interrupt(__irq(CM1), __low_priority, base(IVECT_BASE))
+irqh_cm1(void)
+{
+	if (CM1CON0bits.OUT)
+		softintrs.bits.int_btn_down = 1;
+	else 
+		softintrs.bits.int_btn_up = 1;
+	PIR1bits.C1IF = 0;
+}
+
+void __interrupt(__irq(AD), __low_priority, base(IVECT_BASE))
+irqh_adcc(void)
+{
+	PIE1bits.ADIE = 0;
+	softintrs.bits.int_adcc = 1;
+}
