@@ -4800,7 +4800,7 @@
     (property "Reference" "C?" (id 0) (at 167.64 72.39 90)
       (effects (font (size 1.27 1.27)) (justify right))
     )
-    (property "Value" "0" (id 1) (at 172.085 71.12 90)
+    (property "Value" "N/A" (id 1) (at 171.45 71.12 90)
       (effects (font (size 1.27 1.27)) (justify right))
     )
     (property "Footprint" "Capacitor_SMD:C_0805_2012Metric_Pad1.18x1.45mm_HandSolder" (id 2) (at 168.91 71.12 0)
@@ -5056,7 +5056,7 @@
     (property "Reference" "R?" (id 0) (at 167.005 62.865 90)
       (effects (font (size 1.27 1.27)) (justify right))
     )
-    (property "Value" "0" (id 1) (at 171.45 63.5 90)
+    (property "Value" "N/A" (id 1) (at 171.45 60.96 90)
       (effects (font (size 1.27 1.27)) (justify right))
     )
     (property "Footprint" "Resistor_SMD:R_1210_3225Metric_Pad1.30x2.65mm_HandSolder" (id 2) (at 168.91 62.865 0)
@@ -5471,7 +5471,7 @@
     (property "Reference" "C?" (id 0) (at 173.99 72.39 90)
       (effects (font (size 1.27 1.27)) (justify right))
     )
-    (property "Value" "0" (id 1) (at 178.435 71.12 90)
+    (property "Value" "N/A" (id 1) (at 177.8 71.12 90)
       (effects (font (size 1.27 1.27)) (justify right))
     )
     (property "Footprint" "Capacitor_SMD:C_0805_2012Metric_Pad1.18x1.45mm_HandSolder" (id 2) (at 175.26 71.12 0)
@@ -5925,10 +5925,10 @@
       (reference "C19") (unit 1) (value "100nF") (footprint "Capacitor_SMD:C_0603_1608Metric_Pad1.08x0.95mm_HandSolder")
     )
     (path "/b3cfc9f0-a892-4f82-bbe8-f501b475d4bd"
-      (reference "C?") (unit 1) (value "0") (footprint "Capacitor_SMD:C_0805_2012Metric_Pad1.18x1.45mm_HandSolder")
+      (reference "C?") (unit 1) (value "N/A") (footprint "Capacitor_SMD:C_0805_2012Metric_Pad1.18x1.45mm_HandSolder")
     )
     (path "/e571972a-7a49-4923-8e25-84d0184724f1"
-      (reference "C?") (unit 1) (value "0") (footprint "Capacitor_SMD:C_0805_2012Metric_Pad1.18x1.45mm_HandSolder")
+      (reference "C?") (unit 1) (value "N/A") (footprint "Capacitor_SMD:C_0805_2012Metric_Pad1.18x1.45mm_HandSolder")
     )
     (path "/b97d5a53-2424-4463-9f29-8a4d0e12cc96"
       (reference "D1") (unit 1) (value "SMBJ28A") (footprint "Diode_SMD:D_SMB_Handsoldering")
@@ -6099,7 +6099,7 @@
       (reference "R?") (unit 1) (value "0") (footprint "Resistor_SMD:R_1210_3225Metric_Pad1.30x2.65mm_HandSolder")
     )
     (path "/c86b057e-15c1-4134-8dc4-125bb3619427"
-      (reference "R?") (unit 1) (value "0") (footprint "Resistor_SMD:R_1210_3225Metric_Pad1.30x2.65mm_HandSolder")
+      (reference "R?") (unit 1) (value "N/A") (footprint "Resistor_SMD:R_1210_3225Metric_Pad1.30x2.65mm_HandSolder")
     )
     (path "/a344c995-e9f0-4656-a268-9dcc3bd6cffb"
       (reference "TH1") (unit 1) (value "NTC10K") (footprint "Resistor_SMD:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder")
