@@ -5170,7 +5170,7 @@
   (symbol (lib_id "Diode:1.5KExxA") (at 147.32 44.45 270) (mirror x) (unit 1)
     (in_bom yes) (on_board yes)
     (uuid c49a1ab6-0c8b-44b2-8655-f18d9d69ac69)
-    (property "Reference" "D?" (id 0) (at 147.32 41.91 90)
+    (property "Reference" "D6" (id 0) (at 147.32 41.91 90)
       (effects (font (size 1.27 1.27)) (justify right))
     )
     (property "Value" "SMBJ28A" (id 1) (at 149.86 39.37 0)
@@ -5308,7 +5308,7 @@
   (symbol (lib_id "power:GND") (at 147.32 39.37 180) (unit 1)
     (in_bom yes) (on_board yes)
     (uuid d090734b-afc5-4d03-8a8b-ed0bbb1ac271)
-    (property "Reference" "#PWR?" (id 0) (at 147.32 33.02 0)
+    (property "Reference" "#PWR028" (id 0) (at 147.32 33.02 0)
       (effects (font (size 1.27 1.27)) hide)
     )
     (property "Value" "GND" (id 1) (at 147.193 34.9758 0))
@@ -6023,7 +6023,7 @@
       (reference "#PWR027") (unit 1) (value "GND") (footprint "")
     )
     (path "/d090734b-afc5-4d03-8a8b-ed0bbb1ac271"
-      (reference "#PWR?") (unit 1) (value "GND") (footprint "")
+      (reference "#PWR028") (unit 1) (value "GND") (footprint "")
     )
     (path "/e2f6369a-02b5-4d5b-ba47-235a0926e866"
       (reference "C1") (unit 1) (value "YFF31HC") (footprint "local:C_filter_1206")
@@ -6104,7 +6104,7 @@
       (reference "D5") (unit 1) (value "SMBJ16A") (footprint "Diode_SMD:D_SMB_Handsoldering")
     )
     (path "/c49a1ab6-0c8b-44b2-8655-f18d9d69ac69"
-      (reference "D?") (unit 1) (value "SMBJ28A") (footprint "Diode_SMD:D_SMB_Handsoldering")
+      (reference "D6") (unit 1) (value "SMBJ28A") (footprint "Diode_SMD:D_SMB_Handsoldering")
     )
     (path "/f77ef6fe-b07a-4c34-9717-9039a3036cb9"
       (reference "F1") (unit 1) (value "10A") (footprint "Fuse:Fuseholder_Cylinder-5x20mm_Schurter_0031_8201_Horizontal_Open")
