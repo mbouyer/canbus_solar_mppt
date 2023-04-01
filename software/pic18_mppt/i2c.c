@@ -151,13 +151,26 @@ again:
 	/* read bytes */
 	I2C1PIR = 0;
 	I2C1ERR = 0;
+	I2C1CON0bits.RSEN = 0;
 	I2C1CON1bits.ACKCNT = 1;
 	I2C1CON1bits.ACKDT = 0;
 	I2C1ADB1 = address | 1;
 	I2C1CNTH = 0;
 	I2C1CNTL = size;
 	I2C1CON0bits.S = 1;
-	I2C1CON0bits.RSEN = 0;
+	if (swap) {
+		i2c_data = &data[size - 1];
+		i2c_swap = 1;
+	} else {
+		i2c_data = &data[0];
+		i2c_swap = 0;
+	}
+	i2c_status = I2C_RX;
+	i2c_return = r;
+	I2C_IRQEN;
+	PIE7bits.I2C1RXIE = 1;
+
+#if 0
 	for (i = size ; i != 0; i--) {
 		for (i2c_wait_count = 10000; i2c_wait_count > 0; i2c_wait_count--) {
 			if (I2C1STAT1bits.RXBF)
@@ -177,6 +190,7 @@ again:
 		}
 	}
 	*r= I2C_COMPLETE;
+#endif
 }
 
 void
@@ -325,7 +339,7 @@ irql_i2c1tx(void)
 void __interrupt(__irq(I2C1RX), __low_priority, base(IVECT_BASE))
 irql_i2c1rx(void)
 {
-	I2C1RXB = *i2c_data;
+	*i2c_data = I2C1RXB;
 	if (i2c_swap)
 		i2c_data--;
 	else
