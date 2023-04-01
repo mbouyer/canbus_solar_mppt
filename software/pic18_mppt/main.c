@@ -41,6 +41,8 @@
 #include "font10x16.h"
 #include "icons16x16.h"
 
+static unsigned char default_src;
+
 unsigned int devid, revid; 
 
 unsigned long nmea2000_user_id; 
@@ -214,9 +216,10 @@ logtoi(union log_entry *e)
 }
 
 static void
-page_erase(__uint24 addr)
+page_erase(const void *p)
 {
 	uint8_t err = 0;
+	__uint24 addr = (__uint24)p;
 
 	printf("erase 0x%lx\n", (uint32_t)addr);
 
@@ -242,9 +245,10 @@ page_erase(__uint24 addr)
 }
 
 static void
-page_read(__uint24 addr)
+page_read(const void *p)
 {
 	uint8_t err = 0;
+	__uint24 addr = (__uint24)p;
 
 	printf("read 0x%lx\n", (uint32_t)addr);
 
@@ -259,9 +263,10 @@ page_read(__uint24 addr)
 }
 
 static void
-page_write(__uint24 addr)
+page_write(const void *p)
 {
 	uint8_t err = 0;
+	__uint24 addr = (__uint24)p;
 
 	printf("write 0x%lx\n", (uint32_t)addr);
 
@@ -347,16 +352,16 @@ update_log(void)
 			v = v * 4.06331342566096;
 			break;
 		}
-		v_i = v + 0.5;
+		v_i = (int32_t)(v + 0.5);
 		printf(" %d %4.4fA %ld", c, v / 1000, v_i);
 		itolog(v_i, &curlog.b_entry[log_centry]);
 		/* volt = vbus * 0.000488 */
 		/* batt_v = voltages_acc * 0.000488 * 100 / 6000; */
 		/* adjust by 0.99955132 from calibration data */
 		v = (double)l600_voltages_acc[c] * 0.000008129684;
-		v_i = v + 0.5;
+		v_i = (int32_t)(v + 0.5);
 		printf(" %4.3fV %ld", v / 100, v_i);
-		utolog(v_i, &curlog.b_entry[log_centry]);
+		utolog((uint16_t)v_i, &curlog.b_entry[log_centry]);
 		curlog.b_entry[log_centry].s.instance = c;
 		if (batt_temp[c] == 0xffff) {
 			curlog.b_entry[log_centry].s.temp = 0xff;
@@ -387,7 +392,7 @@ send_log_block(uint8_t sid, uint8_t page)
 		msg.id.priority = NMEA2000_PRIORITY_ACK;
 		msg.dlc = sizeof(struct private_log_reply);
 		private_log_cmd.rp.cmd = PRIVATE_LOG_REPLY;
-		msg.data = &private_log_cmd.rp;
+		msg.data = (void *)&private_log_cmd.rp;
 		private_log_cmd.rp.sid = sid;
 		private_log_cmd.rp.idx =
 		   ((uint16_t)(battlog[page].b_flags & B_FILL_GEN) << 8) | page;
@@ -426,7 +431,7 @@ send_log_error(uint8_t sid, uint8_t code)
 	msg.id.daddr = rid.saddr;
 	msg.id.priority = NMEA2000_PRIORITY_ACK;
 	msg.dlc = sizeof(struct private_log_error);
-	msg.data = &private_log_cmd.er;
+	msg.data = (void *)&private_log_cmd.er;
 	private_log_cmd.er.cmd = PRIVATE_LOG_ERROR;
 	private_log_cmd.er.sid = sid;
 	private_log_cmd.er.error = code;
@@ -701,7 +706,7 @@ read_pac_channel(void)
 	double v;
 
 	i2c_readreg_be(PAC_I2C_ADDR, PAC_ACCCNT,
-	    &pac_acccnt, sizeof(pac_acccnt), &i2c_return);
+	    (void *)&pac_acccnt, sizeof(pac_acccnt), &i2c_return);
 	if (i2c_wait(&i2c_return) != 0) {
 		printf("read pac_acccnt fail\n");
 		pac_acccnt.acccnt_count = 0;
@@ -716,7 +721,7 @@ read_pac_channel(void)
 
 		acc_value = 0;
 		i2c_readreg_be(PAC_I2C_ADDR, PAC_ACCV1 + c,
-		    &acc_value, 7, &i2c_return);
+		    (void *)&acc_value, 7, &i2c_return);
 		if (i2c_wait(&i2c_return) != 0) {
 			printf("read acc_value[%d] fail\n", c);
 			continue;
@@ -740,13 +745,13 @@ read_pac_channel(void)
 			v = v * 4.06331342566096;
 			break;
 		}
-		batt_i[c] = v + 0.5;
+		batt_i[c] = (int16_t)(v + 0.5);
 		printf(" %d %4.4fA", c, v / 100);
 		/* volt = vbus * 0.000488 */
 		/* batt_v = voltages_acc * 0.000488 * 100 / 10; */
 		/* adjust by 0.99955132 from calibration data */
 		v = (double)voltages_acc[c] * 0.0048778104;
-		batt_v[c] = v + 0.5;
+		batt_v[c] = (int16_t)(v + 0.5);
 		printf(" %4.3fV", v / 100);
 	}
 }
@@ -829,7 +834,6 @@ static void _oled_i2c_exec(void)
 			oled_s->oled_type = OLED_CTRL_FREE;
 			return;
 		case OLED_CTRL_CLEAR:
-			printf("clear len %d\n", oled_s->oled_datalen);
 			if (oled_s->oled_datalen != 0) {
 				i2c_writereg_dma(OLED_ADDR, 0x40,
 				    &oled_s->oled_databuf[0],
@@ -874,6 +878,7 @@ oled_i2c_flush(void)
 			return 0;
 		}
 	}
+	return 1;
 }
 			
 
@@ -965,6 +970,7 @@ main(void)
 	uint8_t new_boot;
 	struct oled_i2c_buf_s *oled_s;
 
+	default_src = 0;
 	devid = 0;
 	revid = 0;
 	nmea2000_user_id = 0;
@@ -1423,7 +1429,8 @@ again:
 			ticks = tmrv - poll_count;
 			if (ticks > TIMER0_5MS) {
 				poll_count = tmrv;
-				nmea2000_poll(ticks / TIMER0_1MS);
+				nmea2000_poll(
+				    (unsigned char)(ticks / TIMER0_1MS));
 			}
 			if (nmea2000_status == NMEA2000_S_OK) {
 				printf("new addr %d\n", nmea2000_addr);
@@ -1538,6 +1545,8 @@ again:
 			printf("up\n");
 			btn_state = BTN_IDLE;
 			break;
+		default:
+			break;
 		}
 
 		if (softintrs.bits.int_10hz) {
@@ -1612,7 +1621,8 @@ again:
 				ticks = tmrv - poll_count;
 				if (ticks > TIMER0_5MS) {
 					poll_count = tmrv;
-					nmea2000_poll(ticks / TIMER0_1MS);
+					nmea2000_poll(
+					   (unsigned char)(ticks / TIMER0_1MS));
 				}
 				if (nmea2000_status != NMEA2000_S_OK) {
 					printf("lost CAN bus %d\n",
@@ -1626,8 +1636,12 @@ again:
 			break;
 		if (softintrs.byte == 0)
 			SLEEP();
+		if (default_src != 0) {
+			printf("default handler called for 0x%x\n",
+			    default_src);
+		}
 	}
-	while ((c = getchar()) != 'r') {
+	while ((c = (char)getchar()) != 'r') {
 		printf("resumed %u\n", timer0_read());
 		goto again;
 	}
@@ -1688,4 +1702,10 @@ irqh_adcc(void)
 {
 	PIE1bits.ADIE = 0;
 	softintrs.bits.int_adcc = 1;
+}
+
+void __interrupt(__irq(default), __low_priority, base(IVECT_BASE))
+irqh_default(void)
+{
+	default_src = 0xff;
 }
