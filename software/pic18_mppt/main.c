@@ -90,7 +90,7 @@ unsigned char bright;
 #define PAC_I2C_ADDR 0x2e
 #define NDOWN LATCbits.LATC7
 
-static volatile i2c_return_t pac_i2c_return;
+static volatile i2c_return_t i2c_return;
 
 static enum {
 	BTN_IDLE = 0,
@@ -701,8 +701,8 @@ read_pac_channel(void)
 	double v;
 
 	i2c_readreg_be(PAC_I2C_ADDR, PAC_ACCCNT,
-	    &pac_acccnt, sizeof(pac_acccnt), &pac_i2c_return);
-	if (i2c_wait(&pac_i2c_return) != 0) {
+	    &pac_acccnt, sizeof(pac_acccnt), &i2c_return);
+	if (i2c_wait(&i2c_return) != 0) {
 		printf("read pac_acccnt fail\n");
 		pac_acccnt.acccnt_count = 0;
 		return;
@@ -716,8 +716,8 @@ read_pac_channel(void)
 
 		acc_value = 0;
 		i2c_readreg_be(PAC_I2C_ADDR, PAC_ACCV1 + c,
-		    &acc_value, 7, &pac_i2c_return);
-		if (i2c_wait(&pac_i2c_return) != 0) {
+		    &acc_value, 7, &i2c_return);
+		if (i2c_wait(&i2c_return) != 0) {
 			printf("read acc_value[%d] fail\n", c);
 			continue;
 		}
@@ -753,48 +753,150 @@ read_pac_channel(void)
 
 /* i2c OLED specific */
 
-#define I2C_DATABUFSZ 256
-unsigned char i2c_databuf[I2C_DATABUFSZ];
-unsigned char i2c_datapt;
+#define OLED_I2C_DATABUFSZ	256
+#define OLED_I2C_CTRLBUFSZ	16
+#define OLED_NBUFS		4
 
-#define I2C_CTRLBUFSZ 16
-unsigned char i2c_ctrlbuf[I2C_CTRLBUFSZ];
-unsigned char i2c_ctrlpt;
+static struct oled_i2c_buf_s {
+	unsigned char oled_databuf[OLED_I2C_DATABUFSZ];
+	unsigned char oled_ctrlbuf[OLED_I2C_CTRLBUFSZ];
+	uint16_t  oled_datalen;
+	unsigned char oled_ctrllen;
+	enum {
+		OLED_CTRL_FREE,
+		OLED_CTRL_CLEAR,
+		OLED_CTRL_CMD,
+		OLED_CTRL_DISPLAY,
+	} oled_type;
+} oled_i2c_buf[OLED_NBUFS];
 
-static volatile i2c_return_t oled_i2c_return;
+static enum {
+	OLED_I2C_IDLE,
+	OLED_I2C_WAIT, /* waiting for i2c bus */
+	OLED_I2C_CMD, /* command sent */
+	OLED_I2C_DATA, /* data sent */
+} oled_i2c_state;
 
-static char
-i2c_writecontrol(const char address, uint8_t len)
+static unsigned char oled_i2c_prod;
+static unsigned char oled_i2c_cons;
+
+static void _oled_i2c_exec(void)
 {
-	if (len > I2C_CTRLBUFSZ) {
-		printf("i2c_writecontrol %d tobig\n", len);
-		return I2C_ERROR;
+	struct oled_i2c_buf_s *oled_s;
+
+	switch(oled_i2c_state) {
+	case OLED_I2C_IDLE:
+		return;
+	case OLED_I2C_WAIT:
+		while (oled_i2c_buf[oled_i2c_cons].oled_type == OLED_CTRL_FREE) {
+			oled_i2c_cons = (oled_i2c_cons + 1) & (OLED_NBUFS - 1);
+			if (oled_i2c_cons == oled_i2c_prod &&
+			    oled_i2c_buf[oled_i2c_cons].oled_type == OLED_CTRL_FREE) {
+				return;
+			}
+		}
+		oled_s = &oled_i2c_buf[oled_i2c_cons];
+		i2c_writereg(OLED_ADDR, 0, &oled_s->oled_ctrlbuf[0],
+		    oled_s->oled_ctrllen, &i2c_return);
+		oled_i2c_state = OLED_I2C_CMD;
+		return;
+	case OLED_I2C_CMD:
+		oled_s = &oled_i2c_buf[oled_i2c_cons];
+		switch(oled_s->oled_type) {
+		case OLED_CTRL_DISPLAY:
+			i2c_writereg_dma(OLED_ADDR, 0x40, &oled_s->oled_databuf[0],
+			    oled_s->oled_datalen, &i2c_return);
+			oled_i2c_state = OLED_I2C_DATA;
+			return;
+		case OLED_CTRL_CMD:
+			oled_i2c_state = OLED_I2C_IDLE;
+			oled_s->oled_type = OLED_CTRL_FREE;
+			return;
+		case OLED_CTRL_CLEAR:
+			break;
+		default:
+			printf("oled_i2c_exec: OLED_I2C_CMD cons %d cons_state %d\n",
+			    oled_i2c_cons,
+			    oled_i2c_buf[oled_i2c_cons].oled_type);
+			return;
+		}
+		/* FALLTHROUGH */
+	case OLED_I2C_DATA:
+		oled_s = &oled_i2c_buf[oled_i2c_cons];
+		switch(oled_s->oled_type) {
+		case OLED_CTRL_DISPLAY:
+			oled_i2c_state = OLED_I2C_IDLE;
+			oled_s->oled_type = OLED_CTRL_FREE;
+			return;
+		case OLED_CTRL_CLEAR:
+			printf("clear len %d\n", oled_s->oled_datalen);
+			if (oled_s->oled_datalen != 0) {
+				i2c_writereg_dma(OLED_ADDR, 0x40,
+				    &oled_s->oled_databuf[0],
+				    OLED_I2C_DATABUFSZ, &i2c_return);
+				oled_s->oled_datalen -= OLED_I2C_DATABUFSZ;
+				oled_i2c_state = OLED_I2C_DATA;
+			} else {
+				oled_i2c_state = OLED_I2C_IDLE;
+				oled_s->oled_type = OLED_CTRL_FREE;
+			}
+			return;
+		default:
+			break;
+		}
+	default:
+		printf("oled_i2c_exec: state %d cons %d cons_state %d\n",
+		    oled_i2c_state, oled_i2c_cons,
+		    oled_i2c_buf[oled_i2c_cons].oled_type);
 	}
-	i2c_writereg(address, 0, &i2c_ctrlbuf[0], len, &oled_i2c_return);
-	return i2c_wait(&oled_i2c_return);
+}
+
+static void oled_i2c_exec(void)
+{
+	_oled_i2c_exec();
+	if (oled_i2c_state == OLED_I2C_IDLE &&
+	    oled_i2c_cons != oled_i2c_prod) {
+		/* schedule next command */
+		oled_i2c_cons = (oled_i2c_cons + 1) & (OLED_NBUFS - 1);
+		oled_i2c_state = OLED_I2C_WAIT;
+	}
 }
 
 static char
-i2c_writedata(const char address, uint16_t len)
+oled_i2c_flush(void)
 {
-	i2c_writereg_dma(address, 0x40, &i2c_databuf[0], len, &oled_i2c_return);
-	return i2c_wait(&oled_i2c_return);
+	while (oled_i2c_state != OLED_I2C_IDLE) {
+		oled_i2c_exec();
+		if (i2c_wait(&i2c_return) != 0) {
+			printf("oled_i2c_flush: error %d state %d cons %d cons_state %d\n",
+			    i2c_return, oled_i2c_state, oled_i2c_cons,
+			    oled_i2c_buf[oled_i2c_cons].oled_type);
+			return 0;
+		}
+	}
 }
+			
 
-#define OLED_CTRL(c) \
-        {i2c_ctrlbuf[i2c_ctrlpt++] = (c);}
+#define OLED_CTRL(s, c) \
+        {(s)->oled_ctrlbuf[(s)->oled_ctrllen++] = (c);}
 
-#define OLED_CTRL_RESET {i2c_ctrlpt = 0;}
-
-#define OLED_CTRL_WRITE if (i2c_writecontrol(OLED_ADDR, (i2c_ctrlpt)) != 0) { \
-	    printf("OLED_CTRL %d %ld fail\n", (int)i2c_ctrlbuf[0], (long)(i2c_ctrlpt));\
-	} \
-	OLED_CTRL_RESET
+static struct oled_i2c_buf_s *
+oled_i2c_reset(void)
+{
+	/* select next free slot */
+	while (oled_i2c_buf[oled_i2c_prod].oled_type != OLED_CTRL_FREE) {
+		oled_i2c_prod = (oled_i2c_prod + 1) & (OLED_NBUFS - 1);
+		if (oled_i2c_prod == oled_i2c_cons) {
+			/* no free slot */
+			return NULL;
+		}
+	}
+	oled_i2c_buf[oled_i2c_prod].oled_datalen = 0;
+	oled_i2c_buf[oled_i2c_prod].oled_ctrllen = 0;
+	return &oled_i2c_buf[oled_i2c_prod];
+}
+#define OLED_CTRL_WRITE {oled_s->oled_type = OLED_CTRL_CMD; oled_i2c_state = OLED_I2C_WAIT; oled_i2c_flush(); oled_i2c_reset();}
 	
-#define OLED_DATA(l) if (i2c_writedata(OLED_ADDR, (l)) != 0) { \
-	    printf("OLED_DATA %ld fail\n", (long)(l)); \
-	}
-
 static void
 displaybuf_small(void)
 {
@@ -802,23 +904,25 @@ displaybuf_small(void)
 	char *cp;
 	unsigned char i;
 	unsigned char n;
+	struct oled_i2c_buf_s *oled_s;
 
-	OLED_CTRL_RESET;
-	i2c_datapt = 0;
+	if ((oled_s = oled_i2c_reset()) == 0)
+		return;
+
 	for (n = 0, cp = oled_displaybuf; *cp != '\0'; cp++, n++) {
 		font = get_font5x8(*cp);
 		for (i = 0; i < 5; i++) {
-			i2c_databuf[i2c_datapt++] = font[i];
+			oled_s->oled_databuf[oled_s->oled_datalen++] = font[i];
 		}
 	}
-	/* set column start/end
-	OLED_CTRL_RESET;
-	OLED_CTRL(0x00); OLED_CTRL(0x10);  /* reset column start */
-	OLED_CTRL(0x21); OLED_CTRL(oled_col); OLED_CTRL(oled_col + n * 5 - 1); /*column start/end */
+	/* set column start/end */
+	OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x10);  /* reset column start */
+	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, oled_col); OLED_CTRL(oled_s, oled_col + n * 5 - 1); /*column start/end */
 	/* set page address */
-	OLED_CTRL((oled_line & 0x07 ) | 0xb0 );
-	OLED_CTRL_WRITE;
-	OLED_DATA(i2c_datapt);
+	OLED_CTRL(oled_s, (oled_line & 0x07 ) | 0xb0 );
+	oled_s->oled_type = OLED_CTRL_DISPLAY;
+	if (oled_i2c_state == OLED_I2C_IDLE)
+		oled_i2c_state = OLED_I2C_WAIT;
 }
 
 static void
@@ -827,19 +931,23 @@ displaybuf_icon(char ic)
 	const unsigned char *icon;
 	char *cp;
 	unsigned char i;
+	struct oled_i2c_buf_s *oled_s;
 
-	OLED_CTRL_RESET;
+	if ((oled_s = oled_i2c_reset()) == 0)
+		return;
 	icon = get_icons16x16(ic);
 	for (i = 0; i < 16; i++) {
-		i2c_databuf[i] = icon[i * 2];
-		i2c_databuf[i + 16] = icon[i * 2 + 1];
+		oled_s->oled_databuf[i] = icon[i * 2];
+		oled_s->oled_databuf[i + 16] = icon[i * 2 + 1];
 	}
-	OLED_CTRL(0x00); OLED_CTRL(0x10);  /* reset column start */
-	OLED_CTRL(0x21); OLED_CTRL(oled_col); OLED_CTRL(oled_col + 16 - 1); /*column start/end */
+	oled_s->oled_datalen = 32;
+	OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x10);  /* reset column start */
+	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, oled_col); OLED_CTRL(oled_s, oled_col + 16 - 1); /*column start/end */
 	/* set page address */
-	OLED_CTRL((oled_line & 0x07 ) | 0xb0 );
-	OLED_CTRL_WRITE;
-	OLED_DATA(32);
+	OLED_CTRL(oled_s, (oled_line & 0x07 ) | 0xb0 );
+	oled_s->oled_type = OLED_CTRL_DISPLAY;
+	if (oled_i2c_state == OLED_I2C_IDLE)
+		oled_i2c_state = OLED_I2C_WAIT;
 }
 
 
@@ -855,7 +963,7 @@ main(void)
 	uint16_t t0;
 	static int32_t voltages_acc_cur[4];
 	uint8_t new_boot;
-
+	struct oled_i2c_buf_s *oled_s;
 
 	devid = 0;
 	revid = 0;
@@ -1058,7 +1166,13 @@ main(void)
 	PIE1bits.ADIE = 0;
 
 	printf("display init");
+	oled_i2c_prod = oled_i2c_cons = 0;
+	oled_i2c_state = OLED_I2C_IDLE;
+	for (c = 0; c < OLED_NBUFS; c++) {
+		oled_i2c_buf[c].oled_type = OLED_CTRL_FREE;
+	}
 	/* setup OLED */
+	oled_s = &oled_i2c_buf[oled_i2c_prod];
 	for (l = 0; l < 1000; l++)    
 		CLRWDT();
 	OLED_RSTN = 1;
@@ -1067,68 +1181,69 @@ main(void)
 	printf(" 1");
 
 	/* command lock */
-	OLED_CTRL_RESET;
-	OLED_CTRL(0xfd); OLED_CTRL(0x12);
+	oled_i2c_reset();
+	OLED_CTRL(oled_s, 0xfd); OLED_CTRL(oled_s, 0x12);
 	OLED_CTRL_WRITE;
 	CLRWDT();
 
 	/* display off */
-	OLED_CTRL(0xae);
+	OLED_CTRL(oled_s, 0xae);
 	OLED_CTRL_WRITE;
 	CLRWDT();
 
 	/* set freq */
-	OLED_CTRL(0xd5); OLED_CTRL(0xa0);
+	OLED_CTRL(oled_s, 0xd5); OLED_CTRL(oled_s, 0xa0);
 	OLED_CTRL_WRITE;
 	CLRWDT();
 	/* set multiplexer */
-	OLED_CTRL(0xa8); OLED_CTRL(0x3f);
+	OLED_CTRL(oled_s, 0xa8); OLED_CTRL(oled_s, 0x3f);
 	OLED_CTRL_WRITE;
 	CLRWDT();
 
 	/* display offset */
-	OLED_CTRL(0xd3); OLED_CTRL(0x00);
+	OLED_CTRL(oled_s, 0xd3); OLED_CTRL(oled_s, 0x00);
 	/* start line */
-	OLED_CTRL(0x40);
+	OLED_CTRL(oled_s, 0x40);
 	/* segment remap */
-	OLED_CTRL(0xa0);
+	OLED_CTRL(oled_s, 0xa0);
 	/* com output scan direction */
-	OLED_CTRL(0xc0);
+	OLED_CTRL(oled_s, 0xc0);
 	/* com pin hardware config */
-	OLED_CTRL(0xda); OLED_CTRL(0x12);
+	OLED_CTRL(oled_s, 0xda); OLED_CTRL(oled_s, 0x12);
 	/* current control */
-	// OLED_CTRL(0x81); OLED_CTRL(0xdf);
-	OLED_CTRL(0x81); OLED_CTRL(bright);
+	// OLED_CTRL(oled_s, 0x81); OLED_CTRL(oled_s, 0xdf);
+	OLED_CTRL(oled_s, 0x81); OLED_CTRL(oled_s, bright);
 	/* pre-charge period */
-	OLED_CTRL(0xd9); OLED_CTRL(0x82);
+	OLED_CTRL(oled_s, 0xd9); OLED_CTRL(oled_s, 0x82);
 	/* vcomh deselect level */
-	OLED_CTRL(0xdb); OLED_CTRL(0x34);
+	OLED_CTRL(oled_s, 0xdb); OLED_CTRL(oled_s, 0x34);
 	/* entire display on/off */
-	OLED_CTRL(0xa4);
+	OLED_CTRL(oled_s, 0xa4);
 	/* normal/inverse */
-	OLED_CTRL(0xa6);
+	OLED_CTRL(oled_s, 0xa6);
 	OLED_CTRL_WRITE;
 	CLRWDT();
 	/* clear RAM */
-	OLED_CTRL(0x20); OLED_CTRL(0x00); /* horizontal addressing mode */
-	OLED_CTRL(0x21); OLED_CTRL(0x00); OLED_CTRL(0x7f); /*column start/end */
-	OLED_CTRL(0x22); OLED_CTRL(0x00); OLED_CTRL(0x07); /*page start/end */
-	OLED_CTRL(0x00); OLED_CTRL(0x10);  /* column start */
-	OLED_CTRL(0xb0); /* page start */
+	OLED_CTRL(oled_s, 0x20); OLED_CTRL(oled_s, 0x00); /* horizontal addressing mode */
+	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x7f); /*column start/end */
+	OLED_CTRL(oled_s, 0x22); OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x07); /*page start/end */
+	OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x10);  /* column start */
 	OLED_CTRL_WRITE;
 	CLRWDT();
-	memset(i2c_databuf, 0, I2C_DATABUFSZ);
-	printf(" buf size %d", (int)I2C_DATABUFSZ);
-	i2c_databuf[0] = 0x1;
+	memset(oled_s->oled_databuf, 0, OLED_I2C_DATABUFSZ);
+	printf(" buf size %d", (int)OLED_I2C_DATABUFSZ);
+	oled_s->oled_databuf[0] = 0x1;
+	oled_s->oled_datalen = OLED_DISPLAY_SIZE;
+	OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x10);  /* reset column start */
+	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, 0); OLED_CTRL(oled_s, 0x7f); /*column start/end */
+	OLED_CTRL(oled_s, 0xb0); /* page start */
+	oled_s->oled_type = OLED_CTRL_CLEAR;
+	oled_i2c_state = OLED_I2C_WAIT;
+	oled_i2c_flush();
 
-	for (l = 0; l < OLED_DISPLAY_SIZE; l += I2C_DATABUFSZ) {
-		OLED_DATA(I2C_DATABUFSZ);
-		i2c_databuf[0] = 0x0;
-		CLRWDT();
-	}
 	/* set display on */
-	OLED_CTRL_RESET
-	OLED_CTRL(0xaf);
+	oled_i2c_reset();
+	OLED_CTRL(oled_s, 0xaf);
 	OLED_CTRL_WRITE;
 	CLRWDT();
 	printf(" done\n");
@@ -1199,27 +1314,27 @@ main(void)
 
 again:
 	c = 0;
-	i2c_readreg(PAC_I2C_ADDR, PAC_PRODUCT, &i2cr, 1, &pac_i2c_return);
-	if (i2c_wait(&pac_i2c_return) != 0)
+	i2c_readreg(PAC_I2C_ADDR, PAC_PRODUCT, &i2cr, 1, &i2c_return);
+	if (i2c_wait(&i2c_return) != 0)
 		c++;
 	else 
 		printf("product id 0x%x ", i2cr);
 
-	i2c_readreg(PAC_I2C_ADDR, PAC_MANUF, &i2cr, 1, &pac_i2c_return);
-	if (i2c_wait(&pac_i2c_return) != 0)
+	i2c_readreg(PAC_I2C_ADDR, PAC_MANUF, &i2cr, 1, &i2c_return);
+	if (i2c_wait(&i2c_return) != 0)
 		c++;
 	else
 		printf("manuf id 0x%x ", i2cr);
 
-	i2c_readreg(PAC_I2C_ADDR, PAC_REV, &i2cr, 1, &pac_i2c_return);
-	if (i2c_wait(&pac_i2c_return) != 0)
+	i2c_readreg(PAC_I2C_ADDR, PAC_REV, &i2cr, 1, &i2c_return);
+	if (i2c_wait(&i2c_return) != 0)
 		c++;
 	else
 		printf("rev id 0x%x\n", i2cr);
 
 	i2c_readreg(PAC_I2C_ADDR, PAC_CTRL_ACT,
-	    (uint8_t *)&pac_ctrl, sizeof(pac_ctrl), &pac_i2c_return);
-	if (i2c_wait(&pac_i2c_return) != 0)
+	    (uint8_t *)&pac_ctrl, sizeof(pac_ctrl), &i2c_return);
+	if (i2c_wait(&i2c_return) != 0)
 		c++;
 	else {
 		printf("CTRL_ACT al1 %d al2 %d mode %d dis %d\n",
@@ -1272,12 +1387,14 @@ again:
 	oled_line = 4;
 	sprintf(oled_displaybuf, "hello");
 	displaybuf_small();
+	oled_i2c_flush();
 
 	for (c = 0; c < 4; c++) {
 		oled_col = 20 * c;
 		oled_line = 1;
 		displaybuf_icon(c);
 	}
+	oled_i2c_flush();
 
 	btn_state = BTN_IDLE;
 
@@ -1503,6 +1620,8 @@ again:
 				}
 			}
 		}
+		if (i2c_return != I2C_INPROGRESS)
+			oled_i2c_exec();
 		if (PIR4bits.U1RXIF && (U1RXB == 'r'))
 			break;
 		if (softintrs.byte == 0)
