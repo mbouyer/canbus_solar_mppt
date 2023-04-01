@@ -144,8 +144,10 @@ again:
 	while (!I2C1CON0bits.MDR) {
 		;
 	}
-	if (I2C1ERRbits.NACKIF)
+	if (I2C1ERRbits.NACKIF) {
+		printf("i2c_read NACK\n");
 		goto again;
+	}
 	/* read bytes */
 	I2C1PIR = 0;
 	I2C1ERR = 0;
@@ -293,7 +295,6 @@ i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data,
 	DMAnAIRQ = 0x3b; /* I2C1E */
 	DMAnAIRQ = 0;
 
-	I2C_WAIT_TX; /* make sure address was accepted */
 	DMAnCON0 = 0xc4; /* enable, hardware IRQ trigger/abort */
 
 	i2c_status = I2C_TXDMA;
