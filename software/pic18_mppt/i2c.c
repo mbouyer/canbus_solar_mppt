@@ -268,7 +268,7 @@ i2c_writecmd(const uint8_t address, uint8_t reg, i2c_return_t *r)
 
 void
 i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data,
-    uint8_t size, i2c_return_t *r)
+    uint16_t size, i2c_return_t *r)
 {
 	uint8_t i;
 
@@ -289,8 +289,8 @@ i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data,
 	I2C1CON1bits.ACKDT = 0;
 	I2C1CON1bits.ACKCNT = 1;
 	I2C1ADB1 = address;
-	I2C1CNTH = 0;
-	I2C1CNTL = size + 1;
+	I2C1CNTH = (size + 1) >> 8;
+	I2C1CNTL = (size + 1) & 0xff;
 	I2C1TXB = reg;
 	I2C1CON0bits.S = 1;
 	/* setup DMA1 */
@@ -300,8 +300,8 @@ i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data,
 	DMAnSSAL = ((uint16_t)data) & 0xff;
 	DMAnSSAH = ((uint16_t)data) >> 8;
 	DMAnSSAU = 0;
-	DMAnSSZL = size;
-	DMAnSSZH = 0;
+	DMAnSSZH = (size >> 8);
+	DMAnSSZL = size & 0xff;
 	DMAnDSA = &I2C1TXB;
 	DMAnDSZL = 1;
 	DMAnDSZH = 0;

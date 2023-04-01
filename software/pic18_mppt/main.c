@@ -753,7 +753,7 @@ read_pac_channel(void)
 
 /* i2c OLED specific */
 
-#define I2C_DATABUFSZ 128
+#define I2C_DATABUFSZ 256
 unsigned char i2c_databuf[I2C_DATABUFSZ];
 unsigned char i2c_datapt;
 
@@ -775,7 +775,7 @@ i2c_writecontrol(const char address, uint8_t len)
 }
 
 static char
-i2c_writedata(const char address, uint8_t len)
+i2c_writedata(const char address, uint16_t len)
 {
 	i2c_writereg_dma(address, 0x40, &i2c_databuf[0], len, &oled_i2c_return);
 	return i2c_wait(&oled_i2c_return);

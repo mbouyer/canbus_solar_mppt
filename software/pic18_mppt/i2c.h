@@ -38,7 +38,7 @@ void i2c_readreg_be(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t s
 void i2c_writereg(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, i2c_return_t *r);
 void i2c_writereg_be(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, i2c_return_t *r);
 void i2c_writecmd(const uint8_t address, uint8_t reg, i2c_return_t *r);
-void i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size, i2c_return_t *r);
+void i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data, uint16_t size, i2c_return_t *r);
 
 static char
 i2c_wait(volatile i2c_return_t *r)
