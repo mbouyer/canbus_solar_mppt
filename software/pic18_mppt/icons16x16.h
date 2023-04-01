@@ -26,3 +26,7 @@
  */
 
 const unsigned char __rom *get_icons16x16(unsigned char);
+#define ICON_SUN	0
+#define ICON_LIGHT	1
+#define ICON_ENGINE	2
+#define ICON_WARN	3
