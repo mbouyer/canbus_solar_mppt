@@ -1347,27 +1347,32 @@ again:
 
 		if (softintrs.bits.int_btn_down) {
 			softintrs.bits.int_btn_down = 0;
-			btn_state = BTN_DOWN;
-			/* get btn value */
-			/* XXX context */
-			ADCTX = 3;
-			PIR1bits.ADIF = 0;
-			PIE1bits.ADIE = 1;
-			ADCON0bits.ADON = 1;
-
+			if (btn_state == BTN_IDLE) {
+				btn_state = BTN_DOWN;
+				/* get btn value */
+				/* XXX context */
+				ADCTX = 3;
+				PIR1bits.ADIF = 0;
+				PIE1bits.ADIE = 1;
+				ADCON0bits.ADON = 1;
+			}
 		}
 		if (softintrs.bits.int_btn_up) {
-			softintrs.bits.int_btn_up = 0;
 			switch(btn_state) {
-			case BTN_DOWN_1:
 			case BTN_DOWN_1_P:
-			case BTN_DOWN_2:
 			case BTN_DOWN_2_P:
+				softintrs.bits.int_btn_up = 0;
 				/* this is a up event */
 				btn_state = BTN_UP;
 				break;
+			BTN_DOWN:
+			case BTN_DOWN_1:
+			case BTN_DOWN_2:
+				/* not ready for an UP event yet, wait */
+				break;
 			default:
 				/* transient event */
+				softintrs.bits.int_btn_up = 0;
 				btn_state = BTN_IDLE;
 				break;
 			}
