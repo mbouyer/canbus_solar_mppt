@@ -39,6 +39,7 @@
 #include "pac195x.h"
 #include "font5x8.h"
 #include "font10x16.h"
+#include "icons16x16.h"
 
 unsigned int devid, revid; 
 
@@ -752,33 +753,41 @@ read_pac_channel(void)
 
 /* i2c OLED specific */
 
-#define I2C_BUFSZ 128
-unsigned char i2c_buf[I2C_BUFSZ];
-unsigned char i2c_pt;
+#define I2C_DATABUFSZ 128
+unsigned char i2c_databuf[I2C_DATABUFSZ];
+unsigned char i2c_datapt;
+
+#define I2C_CTRLBUFSZ 16
+unsigned char i2c_ctrlbuf[I2C_CTRLBUFSZ];
+unsigned char i2c_ctrlpt;
 
 static volatile i2c_return_t oled_i2c_return;
 
 static char
 i2c_writecontrol(const char address, uint8_t len)
 {
-	i2c_writereg(address, 0, &i2c_buf[0], len, &oled_i2c_return);
+	if (len > I2C_CTRLBUFSZ) {
+		printf("i2c_writecontrol %d tobig\n", len);
+		return I2C_ERROR;
+	}
+	i2c_writereg(address, 0, &i2c_ctrlbuf[0], len, &oled_i2c_return);
 	return i2c_wait(&oled_i2c_return);
 }
 
 static char
 i2c_writedata(const char address, uint8_t len)
 {
-	i2c_writereg_dma(address, 0x40, &i2c_buf[0], len, &oled_i2c_return);
+	i2c_writereg_dma(address, 0x40, &i2c_databuf[0], len, &oled_i2c_return);
 	return i2c_wait(&oled_i2c_return);
 }
 
 #define OLED_CTRL(c) \
-        {i2c_buf[i2c_pt++] = (c);}
+        {i2c_ctrlbuf[i2c_ctrlpt++] = (c);}
 
-#define OLED_CTRL_RESET {i2c_pt = 0;}
+#define OLED_CTRL_RESET {i2c_ctrlpt = 0;}
 
-#define OLED_CTRL_WRITE if (i2c_writecontrol(OLED_ADDR, (i2c_pt)) != 0) { \
-	    printf("OLED_CTRL %d %ld fail\n", (int)i2c_buf[0], (long)(i2c_pt));\
+#define OLED_CTRL_WRITE if (i2c_writecontrol(OLED_ADDR, (i2c_ctrlpt)) != 0) { \
+	    printf("OLED_CTRL %d %ld fail\n", (int)i2c_ctrlbuf[0], (long)(i2c_ctrlpt));\
 	} \
 	OLED_CTRL_RESET
 	
@@ -792,22 +801,45 @@ displaybuf_small(void)
 	const unsigned char *font;
 	char *cp;
 	unsigned char i;
+	unsigned char n;
 
 	OLED_CTRL_RESET;
-	/* set column address */
-	OLED_CTRL(oled_col & 0x0f); OLED_CTRL(0x10 | (oled_col >> 4));
+	i2c_datapt = 0;
+	for (n = 0, cp = oled_displaybuf; *cp != '\0'; cp++, n++) {
+		font = get_font5x8(*cp);
+		for (i = 0; i < 5; i++) {
+			i2c_databuf[i2c_datapt++] = font[i];
+		}
+	}
+	/* set column start/end
+	OLED_CTRL_RESET;
+	OLED_CTRL(0x00); OLED_CTRL(0x10);  /* reset column start */
+	OLED_CTRL(0x21); OLED_CTRL(oled_col); OLED_CTRL(oled_col + n * 5 - 1); /*column start/end */
 	/* set page address */
 	OLED_CTRL((oled_line & 0x07 ) | 0xb0 );
 	OLED_CTRL_WRITE;
+	OLED_DATA(i2c_datapt);
+}
 
-	i2c_pt = 0;
-	for (cp = oled_displaybuf; *cp != '\0'; cp++) {
-		font = get_font5x8(*cp);
-		for (i = 0; i < 5; i++) {
-			i2c_buf[i2c_pt++] = font[i];
-		}
+static void
+displaybuf_icon(char ic)
+{
+	const unsigned char *icon;
+	char *cp;
+	unsigned char i;
+
+	OLED_CTRL_RESET;
+	icon = get_icons16x16(ic);
+	for (i = 0; i < 16; i++) {
+		i2c_databuf[i] = icon[i * 2];
+		i2c_databuf[i + 16] = icon[i * 2 + 1];
 	}
-	OLED_DATA(i2c_pt);
+	OLED_CTRL(0x00); OLED_CTRL(0x10);  /* reset column start */
+	OLED_CTRL(0x21); OLED_CTRL(oled_col); OLED_CTRL(oled_col + 16 - 1); /*column start/end */
+	/* set page address */
+	OLED_CTRL((oled_line & 0x07 ) | 0xb0 );
+	OLED_CTRL_WRITE;
+	OLED_DATA(32);
 }
 
 
@@ -1078,30 +1110,20 @@ main(void)
 	OLED_CTRL_WRITE;
 	CLRWDT();
 	/* clear RAM */
-	OLED_CTRL(0x20); OLED_CTRL(0x00); /* page addressing mode */
+	OLED_CTRL(0x20); OLED_CTRL(0x00); /* horizontal addressing mode */
 	OLED_CTRL(0x21); OLED_CTRL(0x00); OLED_CTRL(0x7f); /*column start/end */
 	OLED_CTRL(0x22); OLED_CTRL(0x00); OLED_CTRL(0x07); /*page start/end */
 	OLED_CTRL(0x00); OLED_CTRL(0x10);  /* column start */
 	OLED_CTRL(0xb0); /* page start */
 	OLED_CTRL_WRITE;
 	CLRWDT();
-#if 0
-	i2c_buf[0] = 0x20; i2c_buf[1] = 0x00;
-	i2c_buf[2] = 0x21; i2c_buf[3] = 0x00; i2c_buf[4] = 0x7f; /*column start/end */
-	i2c_buf[5] = 0x22; i2c_buf[6] = 0x00; i2c_buf[7] = 0x07; /*page start/end */
-	i2c_buf[8] = 0x00; i2c_buf[9] = 0x10;  /* column start */
-	i2c_buf[10] = 0xb0; /* page start */
-	i2c_writecontrol_m(OLED_ADDR, 11);
-#endif
+	memset(i2c_databuf, 0, I2C_DATABUFSZ);
+	printf(" buf size %d", (int)I2C_DATABUFSZ);
+	i2c_databuf[0] = 0x1;
 
-	CLRWDT();
-	memset(i2c_buf, 0, I2C_BUFSZ);
-	printf(" buf size %d", (int)I2C_BUFSZ);
-	i2c_buf[0] = 0x1;
-
-	for (l = 0; l < OLED_DISPLAY_SIZE; l += I2C_BUFSZ) {
-		OLED_DATA(I2C_BUFSZ);
-		i2c_buf[0] = 0x0;
+	for (l = 0; l < OLED_DISPLAY_SIZE; l += I2C_DATABUFSZ) {
+		OLED_DATA(I2C_DATABUFSZ);
+		i2c_databuf[0] = 0x0;
 		CLRWDT();
 	}
 	/* set display on */
@@ -1250,6 +1272,12 @@ again:
 	oled_line = 4;
 	sprintf(oled_displaybuf, "hello");
 	displaybuf_small();
+
+	for (c = 0; c < 4; c++) {
+		oled_col = 20 * c;
+		oled_line = 1;
+		displaybuf_icon(c);
+	}
 
 	btn_state = BTN_IDLE;
 
