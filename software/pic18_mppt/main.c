@@ -41,18 +41,22 @@
 #include "font10x16.h"
 #include "icons16x16.h"
 
-static unsigned char default_src;
+typedef unsigned char u_char;
+typedef unsigned int  u_int;
+typedef unsigned long u_long;
 
-unsigned int devid, revid; 
+static u_char default_src;
 
-unsigned long nmea2000_user_id; 
+u_int devid, revid; 
 
-static unsigned char sid;
+u_long nmea2000_user_id; 
+
+static u_char sid;
 
 static struct nmea2000_msg msg;
-static unsigned char nmea2000_data[NMEA2000_DATA_FASTLENGTH];
+static u_char nmea2000_data[NMEA2000_DATA_FASTLENGTH];
 
-unsigned int timer0_read(void);
+u_int timer0_read(void);
 
 #define TIMER0_5MS 48
 #define TIMER0_1MS 10
@@ -162,7 +166,7 @@ union __packed {
 	struct private_log_error er;
 	struct private_log_reset rst;
 } private_log_cmd;
-static unsigned char fastid;
+static u_char fastid;
 
 static inline void
 utolog(uint16_t u, union log_entry *e)
@@ -476,7 +480,7 @@ handle_log_request(uint8_t cmd) {
 }
 
 static void
-adctotemp(unsigned char c)
+adctotemp(u_char c)
 {
 	char i;
 	for (i = 1; temps[i].val != 0; i++) {
@@ -521,7 +525,7 @@ static void
 send_dc_status(void)
 {
 	struct nmea2000_dc_status_data *data = (void *)&nmea2000_data[0];
-	static unsigned char fastid;
+	static u_char fastid;
 
 	if (input_volt == 0xffff)
 		return;
@@ -542,7 +546,7 @@ send_dc_status(void)
 	case OFF:
 		data->type = DCSTAT_TYPE_BATT;
 		if (batt_v > 1240) {
-			data->soc = 100 - ((unsigned long)time_on_batt * 100UL / 7200UL);
+			data->soc = 100 - ((u_long)time_on_batt * 100UL / 7200UL);
 		} else {
 			data->soc = 50 - (1240 - batt_v) * 50 / (1240 - 1100);
 		}
@@ -555,7 +559,7 @@ send_dc_status(void)
 		data->type = DCSTAT_TYPE_CONV;
 		data->soc = 0xff;
 		data->soh =
-		    ((unsigned long)input_volt * 100UL + 6000UL) / 12000;
+		    ((u_long)input_volt * 100UL + 6000UL) / 12000;
 		data->timeremain = 0xffff;
 		data->ripple = 0xffff;
 		break;
@@ -586,7 +590,7 @@ send_charger_status()
 #endif
 
 void
-user_handle_iso_request(unsigned long pgn)
+user_handle_iso_request(u_long pgn)
 {
 	printf("ISO_REQUEST for %ld from %d\n", pgn, rid.saddr);
 	switch(pgn) {
@@ -610,17 +614,17 @@ user_handle_iso_request(unsigned long pgn)
 void
 user_receive()
 {
-	unsigned long pgn;
+	u_long pgn;
 
-	pgn = ((unsigned long)rid.page << 16) | ((unsigned long)rid.iso_pg << 8);
+	pgn = ((u_long)rid.page << 16) | ((u_long)rid.iso_pg << 8);
 	if (rid.iso_pg > 239)
 		pgn |= rid.daddr;
 
 	switch(pgn) {
 	case PRIVATE_LOG:
 	    {
-		unsigned char idx = (rdata[0] & FASTPACKET_IDX_MASK);
-		unsigned char id =  (rdata[0] & FASTPACKET_ID_MASK);
+		u_char idx = (rdata[0] & FASTPACKET_IDX_MASK);
+		u_char id =  (rdata[0] & FASTPACKET_ID_MASK);
 		char i, j;
 
 		if (idx == 0) {
@@ -749,12 +753,12 @@ read_pac_channel(void)
 #define DISPLAY_FONTSMALL_W     6
 
 char oled_displaybuf[OLED_DISPLAY_W / DISPLAY_FONTSMALL_W];
-static unsigned char oled_col;
-static unsigned char oled_line;
+static u_char oled_col;
+static u_char oled_line;
 
 #define OLED_RSTN	LATAbits.LATA4
 
-unsigned char bright;
+u_char bright;
 
 /* i2c OLED specific */
 
@@ -763,10 +767,10 @@ unsigned char bright;
 #define OLED_NBUFS		4
 
 static struct oled_i2c_buf_s {
-	unsigned char oled_databuf[OLED_I2C_DATABUFSZ];
-	unsigned char oled_ctrlbuf[OLED_I2C_CTRLBUFSZ];
+	u_char oled_databuf[OLED_I2C_DATABUFSZ];
+	u_char oled_ctrlbuf[OLED_I2C_CTRLBUFSZ];
 	uint16_t  oled_datalen;
-	unsigned char oled_ctrllen;
+	u_char oled_ctrllen;
 	enum {
 		OLED_CTRL_FREE,
 		OLED_CTRL_CLEAR,
@@ -782,8 +786,8 @@ static enum {
 	OLED_I2C_DATA, /* data sent */
 } oled_i2c_state;
 
-static unsigned char oled_i2c_prod;
-static unsigned char oled_i2c_cons;
+static u_char oled_i2c_prod;
+static u_char oled_i2c_cons;
 
 static void _oled_i2c_exec(void)
 {
@@ -905,9 +909,9 @@ oled_i2c_reset(void)
 static void
 displaybuf_small(void)
 {
-	const unsigned char *font;
+	const u_char *font;
 	char *cp;
-	unsigned char i;
+	u_char i;
 	struct oled_i2c_buf_s *oled_s;
 
 	if ((oled_s = oled_i2c_reset()) == NULL)
@@ -923,7 +927,7 @@ displaybuf_small(void)
 	/* set column start/end */
 	OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x10);  /* reset column start */
 	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, oled_col);
-	    OLED_CTRL(oled_s, oled_col + (unsigned char)oled_s->oled_datalen - 1); /*column start/end */
+	    OLED_CTRL(oled_s, oled_col + (u_char)oled_s->oled_datalen - 1); /*column start/end */
 	/* set page address */
 	OLED_CTRL(oled_s, (oled_line & 0x07 ) | 0xb0 );
 	oled_s->oled_type = OLED_CTRL_DISPLAY;
@@ -934,9 +938,9 @@ displaybuf_small(void)
 static void
 displaybuf_medium(void)
 {
-	const unsigned char *font;
+	const u_char *font;
 	char *cp;
-	unsigned char i, n;
+	u_char i, n;
 	struct oled_i2c_buf_s *oled_s;
 
 	if ((oled_s = oled_i2c_reset()) == NULL)
@@ -967,9 +971,9 @@ displaybuf_medium(void)
 static void
 displaybuf_icon(char ic)
 {
-	const unsigned char *icon;
+	const u_char *icon;
 	char *cp;
-	unsigned char i;
+	u_char i;
 	struct oled_i2c_buf_s *oled_s;
 
 	if ((oled_s = oled_i2c_reset()) == NULL)
@@ -997,7 +1001,7 @@ main(void)
 	uint8_t i2cr;
 	pac_accumcfg_t pac_accumcfg;
 	pac_neg_pwr_fsr_t pac_neg_pwr_fsr;
-	static unsigned int poll_count;
+	static u_int poll_count;
 	uint16_t t0;
 	static int32_t voltages_acc_cur[4];
 	uint8_t new_boot;
@@ -1463,7 +1467,7 @@ again:
 			if (ticks > TIMER0_5MS) {
 				poll_count = tmrv;
 				nmea2000_poll(
-				    (unsigned char)(ticks / TIMER0_1MS));
+				    (u_char)(ticks / TIMER0_1MS));
 			}
 			if (nmea2000_status == NMEA2000_S_OK) {
 				printf("new addr %d\n", nmea2000_addr);
@@ -1473,7 +1477,7 @@ again:
 #ifdef USEADC
 		if (PIR1bits.ADIF) {
 			PIR1bits.ADIF = 0;
-			a2d_acc = ((unsigned int)ADRESH << 8) | ADRESL;
+			a2d_acc = ((u_int)ADRESH << 8) | ADRESL;
 			switch (ADPCH) {
 			case 0:
 				/* channel 0: NTC */
@@ -1655,7 +1659,7 @@ again:
 				if (ticks > TIMER0_5MS) {
 					poll_count = tmrv;
 					nmea2000_poll(
-					   (unsigned char)(ticks / TIMER0_1MS));
+					   (u_char)(ticks / TIMER0_1MS));
 				}
 				if (nmea2000_status != NMEA2000_S_OK) {
 					printf("lost CAN bus %d\n",
@@ -1687,10 +1691,10 @@ again:
 	return 0;
 }
 
-unsigned int
+u_int
 timer0_read(void)
 {
-	unsigned int value;
+	u_int value;
 
 	/* timer0_value = TMR0L | (TMR0H << 8), reading TMR0L first */
 	di();
