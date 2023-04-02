@@ -120,14 +120,14 @@ typedef struct {
 
 #define PAC_NEG_PWR_FSR	0x1d
 typedef struct {
-	uint8_t pwrfsr_vs4	:2;
-	uint8_t pwrfsr_vs3	:2;
-	uint8_t pwrfsr_vs2	:2;
-	uint8_t pwrfsr_vs1	:2;
 	uint8_t pwrfsr_vb4	:2;
 	uint8_t pwrfsr_vb3	:2;
 	uint8_t pwrfsr_vb2	:2;
 	uint8_t pwrfsr_vb1	:2;
+	uint8_t pwrfsr_vs4	:2;
+	uint8_t pwrfsr_vs3	:2;
+	uint8_t pwrfsr_vs2	:2;
+	uint8_t pwrfsr_vs1	:2;
 } pac_neg_pwr_fsr_t;
 #define PAC_PWRSFR_UFSR		0x0
 #define PAC_PWRSFR_BFSR		0x1
