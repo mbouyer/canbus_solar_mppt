@@ -78,10 +78,7 @@ static volatile union softintrs {
 
 static uint16_t a2d_acc;
 
-#define PAC_I2C_ADDR 0x2e
-#define NDOWN LATCbits.LATC7
-
-static volatile i2c_return_t i2c_return;
+static uint16_t board_temp;
 
 static enum {
 	BTN_IDLE = 0,
@@ -93,9 +90,14 @@ static enum {
 	BTN_UP
 } btn_state;
 
+
+#define PAC_I2C_ADDR 0x2e
+#define NDOWN LATCbits.LATC7
+
+static volatile i2c_return_t i2c_return;
+
 int16_t batt_v[4];
 int16_t batt_i[4];
-uint16_t batt_temp[4];
 
 static int32_t voltages_acc[4];
 pac_ctrl_t pac_ctrl;
@@ -104,6 +106,139 @@ pac_ctrl_t pac_ctrl;
 static int64_t l600_current_acc[4];
 static __uint24 l600_current_count;
 static uint32_t l600_voltages_acc[4];
+
+/* PAC 195x state machine */
+
+static struct pac_i2c_io {
+	enum {
+		PAC_FREE = 0,
+		PAC_WRITE, /* general register write */
+		PAC_READ, /* general register read */
+		PAC_READ_ACCUM, /* read accumulator values */
+		PAC_READ_AVG, /* read recent average values */
+	} pac_type;
+	u_char pac_reg; /* register address */
+	void *pac_data; /* pointer to data for read/write */
+	u_char pac_datalen;
+} pac_i2c_io;
+
+#define PAC_WRITEREG(reg, data) {\
+	pac_i2c_io.pac_type = PAC_WRITE;\
+	pac_i2c_io.pac_reg = (reg);\
+	pac_i2c_io.pac_data = &(data);\
+	pac_i2c_io.pac_datalen = sizeof(data);\
+	pac_i2c_state = PAC_I2C_WAIT;\
+	}
+
+#define PAC_READREG(reg, data) {\
+	pac_i2c_io.pac_type = PAC_READ;\
+	pac_i2c_io.pac_reg = (reg);\
+	pac_i2c_io.pac_data = &(data);\
+	pac_i2c_io.pac_datalen = sizeof(data);\
+	pac_i2c_state = PAC_I2C_WAIT;\
+	}
+
+#define PAC_WRITECMD(reg) {\
+	pac_i2c_io.pac_type = PAC_WRITE;\
+	pac_i2c_io.pac_reg = (reg);\
+	pac_i2c_io.pac_data = NULL;\
+	pac_i2c_io.pac_datalen = 0;\
+	pac_i2c_state = PAC_I2C_WAIT;\
+	}
+
+/*
+ * buffer to read accumulator count and all channel accumulators at once
+ * as we're using readreg_be, the register order is inverted
+ */
+static struct { 
+	u_char accum[3*7]; 
+	uint16_t acc_count;
+} _read_accum;
+
+/*
+ * buffer to read voltage/current values at once 
+ * as we're using readreg_be, the register order is inverted
+ */
+static struct {
+	int16_t batt_i[4];
+	int16_t batt_v[4];
+} _read_voltcur;
+
+static enum {
+	PAC_I2C_IDLE,
+	PAC_I2C_WAIT, /* waiting for i2c bus */
+	PAC_I2C_WRITE,/* sending data */
+	PAC_I2C_READ, /* reading data */
+} pac_i2c_state;
+
+static void
+pac_i2c_exec(void)
+{
+	switch(pac_i2c_state) {
+	case PAC_I2C_IDLE:
+		return;
+	case PAC_I2C_WAIT:
+		switch(pac_i2c_io.pac_type) {
+		case PAC_WRITE:
+			i2c_writereg_be(PAC_I2C_ADDR, pac_i2c_io.pac_reg,
+			    pac_i2c_io.pac_data, pac_i2c_io.pac_datalen,
+			    &i2c_return);
+			pac_i2c_state = PAC_I2C_WRITE;
+			return;
+		case PAC_READ:
+			i2c_readreg_be(PAC_I2C_ADDR, pac_i2c_io.pac_reg,
+			    pac_i2c_io.pac_data, pac_i2c_io.pac_datalen,
+			    &i2c_return);
+			pac_i2c_state = PAC_I2C_READ;
+			return;
+		case PAC_READ_ACCUM:
+			i2c_readreg_be(PAC_I2C_ADDR, PAC_ACCCNT,
+			    (void *)&_read_accum, sizeof(_read_accum), &i2c_return);
+			pac_i2c_state = PAC_I2C_READ;
+			return;
+		case PAC_READ_AVG:
+			i2c_readreg_be(PAC_I2C_ADDR, PAC_VBUS1_AVG,
+			    (void *)&_read_voltcur, sizeof(_read_voltcur), &i2c_return);
+			pac_i2c_state = PAC_I2C_READ;
+			return;
+		default:
+			printf("pac_i2c_exec PAC_I2C_WAIT bad type %d\n",
+			    pac_i2c_io.pac_type);
+		}
+		return;
+	case PAC_I2C_WRITE:
+	case PAC_I2C_READ:
+		switch(i2c_return) {
+		case I2C_INPROGRESS:
+			return;
+		case I2C_COMPLETE:
+			pac_i2c_io.pac_type = PAC_FREE;
+			pac_i2c_state = PAC_I2C_IDLE;
+			return;
+		case I2C_ERROR:
+			/* XXX */
+			printf("pac command %d fail\n", 
+			    pac_i2c_io.pac_type);
+			pac_i2c_io.pac_type = PAC_FREE;
+			pac_i2c_state = PAC_I2C_IDLE;
+			return;
+		}
+	}
+}
+
+static char
+pac_i2c_flush(void)
+{
+	while (pac_i2c_state != PAC_I2C_IDLE) {
+		pac_i2c_exec();
+		if (i2c_wait(&i2c_return) != 0) {
+			printf("pac_i2c_flush: error %d state %d io_state %d\n",
+			    i2c_return, pac_i2c_state, pac_i2c_io.pac_type);
+			return 0;
+		}
+	}
+	return 1;
+}
 
 /*
  * journal data structure (record every 10mn)
@@ -352,12 +487,15 @@ update_log(void)
 		printf(" %4.3fV %ld", v / 100, v_i);
 		utolog((uint16_t)v_i, &curlog.b_entry[log_centry]);
 		curlog.b_entry[log_centry].s.instance = c;
-		if (batt_temp[c] == 0xffff) {
+#if 0
+		XXX
+		if (board_temp == 0xffff) {
 			curlog.b_entry[log_centry].s.temp = 0xff;
 		} else {
 			curlog.b_entry[log_centry].s.temp =
-			    (uint8_t)((batt_temp[c] - 23300) / 100);
+			    (uint8_t)((board_temp - 23300) / 100);
 		}
+#endif
 		next_log_entry();
 		l600_current_acc[c] = 0;
 		l600_voltages_acc[c] = 0;
@@ -485,14 +623,14 @@ adctotemp(u_char c)
 	char i;
 	for (i = 1; temps[i].val != 0; i++) {
 		if (a2d_acc > temps[i].val) {
-			batt_temp[c] = temps[i - 1].temp -
+			board_temp = temps[i - 1].temp -
 			((temps[i - 1].temp - temps[i].temp)  /
 		         (temps[i - 1].val - temps[i].val)  * 
 			 (temps[i - 1].val - a2d_acc));
 			return;
 		}
 	} 
-	batt_temp[c] = 0xffff;
+	board_temp = 0xffff;
 }
 
 static void
@@ -512,7 +650,7 @@ send_batt_status(char c)
 	msg.data = &nmea2000_data[0];
 	data->voltage = batt_v[c];
 	data->current = batt_i[c];
-	data->temp = batt_temp[c];
+	data->temp = board_temp;
 	data->sid = sid;
 	data->instance = c;
 	if (! nmea2000_send_single_frame(&msg))
@@ -789,7 +927,8 @@ static enum {
 static u_char oled_i2c_prod;
 static u_char oled_i2c_cons;
 
-static void _oled_i2c_exec(void)
+static void
+_oled_i2c_exec(void)
 {
 	struct oled_i2c_buf_s *oled_s;
 
@@ -859,7 +998,8 @@ static void _oled_i2c_exec(void)
 	}
 }
 
-static void oled_i2c_exec(void)
+static void
+oled_i2c_exec(void)
 {
 	_oled_i2c_exec();
 	if (oled_i2c_state == OLED_I2C_IDLE &&
@@ -1357,27 +1497,26 @@ main(void)
 
 again:
 	c = 0;
-	i2c_readreg(PAC_I2C_ADDR, PAC_PRODUCT, &i2cr, 1, &i2c_return);
-	if (i2c_wait(&i2c_return) != 0)
+	PAC_READREG(PAC_PRODUCT, i2cr);
+	if (pac_i2c_flush() == 0)
 		c++;
 	else 
 		printf("product id 0x%x ", i2cr);
 
-	i2c_readreg(PAC_I2C_ADDR, PAC_MANUF, &i2cr, 1, &i2c_return);
-	if (i2c_wait(&i2c_return) != 0)
+	PAC_READREG(PAC_MANUF, i2cr);
+	if (pac_i2c_flush() == 0)
 		c++;
 	else
 		printf("manuf id 0x%x ", i2cr);
 
-	i2c_readreg(PAC_I2C_ADDR, PAC_REV, &i2cr, 1, &i2c_return);
-	if (i2c_wait(&i2c_return) != 0)
+	PAC_READREG(PAC_REV, i2cr);
+	if (pac_i2c_flush() == 0)
 		c++;
 	else
 		printf("rev id 0x%x\n", i2cr);
 
-	i2c_readreg(PAC_I2C_ADDR, PAC_CTRL_ACT,
-	    (uint8_t *)&pac_ctrl, sizeof(pac_ctrl), &i2c_return);
-	if (i2c_wait(&i2c_return) != 0)
+	PAC_READREG(PAC_CTRL_ACT, pac_ctrl);
+	if (pac_i2c_flush() == 0)
 		c++;
 	else {
 		printf("CTRL_ACT al1 %d al2 %d mode %d dis %d\n",
@@ -1391,8 +1530,8 @@ again:
 	pac_ctrl.ctrl_alert1 = pac_ctrl.ctrl_alert2 = CTRL_ALERT_ALERT;
 	pac_ctrl.ctrl_mode = CTRL_MODE_1024;
 
-	if (i2c_writereg(PAC_I2C_ADDR,
-	    PAC_CTRL, (uint8_t *)&pac_ctrl, sizeof(pac_ctrl)) == 0) {
+	PAC_WRITEREG(PAC_CTRL, pac_ctrl);
+	if (pac_i2c_flush() == 0) {
 		printf("wr PAC_CTRL fail\n");
 		c++;
 	}
@@ -1401,8 +1540,8 @@ again:
 	pac_accumcfg.accumcfg_acc2 = ACCUMCFG_VSENSE;
 	pac_accumcfg.accumcfg_acc3 = ACCUMCFG_VSENSE;
 	pac_accumcfg.accumcfg_acc4 = ACCUMCFG_VSENSE;
-	if (i2c_writereg(PAC_I2C_ADDR,
-	    PAC_ACCUMCFG, (uint8_t *)&pac_accumcfg, sizeof(pac_accumcfg)) == 0) {
+	PAC_WRITEREG(PAC_ACCUMCFG, pac_accumcfg);
+	if (pac_i2c_flush() == 0) {
 		printf("wr PAC_ACCUMCFG fail\n");
 		c++;
 	}
@@ -1411,14 +1550,14 @@ again:
 	pac_neg_pwr_fsr.pwrfsr_vb2 = pac_neg_pwr_fsr.pwrfsr_vs2 = PAC_PWRSFR_BHALF;
 	pac_neg_pwr_fsr.pwrfsr_vb3 = pac_neg_pwr_fsr.pwrfsr_vs3 = PAC_PWRSFR_BHALF;
 	pac_neg_pwr_fsr.pwrfsr_vb4 = pac_neg_pwr_fsr.pwrfsr_vs4 = PAC_PWRSFR_BHALF;
-	if (i2c_writereg(PAC_I2C_ADDR,
-	    PAC_NEG_PWR_FSR, (uint8_t *)&pac_neg_pwr_fsr,
-	    sizeof(pac_neg_pwr_fsr)) == 0) {
+	PAC_WRITEREG(PAC_NEG_PWR_FSR, pac_neg_pwr_fsr);
+	if (pac_i2c_flush() == 0) {
 		printf("wr PAC_NEG_PWR_FSR fail\n");
 		c++;
 	}
 
-	if (i2c_writecmd(PAC_I2C_ADDR, PAC_REFRESH) == 0) {
+	PAC_WRITECMD(PAC_REFRESH);
+	if (pac_i2c_flush() == 0) {
 		printf("cmd PAC_REFRESH fail\n");
 		c++;
 	}
