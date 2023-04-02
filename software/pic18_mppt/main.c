@@ -1149,11 +1149,13 @@ oled_i2c_reset(void)
 {
 	/* select next free slot */
 	while (oled_i2c_buf[oled_i2c_prod].oled_type != OLED_CTRL_FREE) {
-		oled_i2c_prod = (oled_i2c_prod + 1) & (OLED_NBUFS - 1);
-		if (oled_i2c_prod == oled_i2c_cons) {
+		u_char new_i2c_prod;
+		new_i2c_prod = (oled_i2c_prod + 1) & (OLED_NBUFS - 1);
+		if (new_i2c_prod == oled_i2c_cons) {
 			/* no free slot */
 			return NULL;
 		}
+		oled_i2c_prod = new_i2c_prod;
 	}
 	oled_i2c_buf[oled_i2c_prod].oled_datalen = 0;
 	oled_i2c_buf[oled_i2c_prod].oled_ctrllen = 0;
@@ -1705,6 +1707,42 @@ again:
 	PIR1bits.C1IF = 0; /* clear any pending interrupt */
 	PIE1bits.C1IE = 1; /* enable */
 
+	/* wait 1s, clear display and start operations */
+	for (c = 0; c < 100; c++) {
+		t0 = timer0_read();
+		while (timer0_read() - t0 < (TIMER0_1MS * 10)) {
+			CLRWDT();
+		}
+	}
+
+	/* clear display and put static infos */
+	oled_s = oled_i2c_reset();
+	memset(oled_s->oled_databuf, 0, OLED_I2C_DATABUFSZ);
+	oled_s->oled_datalen = OLED_DISPLAY_SIZE;
+	OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x10);  /* reset column start */
+	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, 0); OLED_CTRL(oled_s, 0x7f); /*column start/end */
+	OLED_CTRL(oled_s, 0xb0); /* page start */
+	oled_s->oled_type = OLED_CTRL_CLEAR;
+	oled_i2c_state = OLED_I2C_WAIT;
+	oled_i2c_flush();
+
+	oled_col = 0;
+	oled_line = 0;
+	displaybuf_icon(ICON_SUN);
+	oled_i2c_flush();
+
+	oled_col = 0;
+	oled_line = 3;
+	displaybuf_icon(ICON_LIGHT);
+	oled_i2c_flush();
+
+	oled_col = 0;
+	oled_line = 6;
+	displaybuf_icon(ICON_ENGINE);
+	oled_i2c_flush();
+
+	printf("enter loop\n");
+
 	while (1) {
 		CLRWDT();
 		if (C1INTLbits.RXIF) {
@@ -1843,6 +1881,31 @@ again:
 		if (softintrs.bits.int_10hz) {
 			softintrs.bits.int_10hz = 0;
 			counter_1hz--;
+			if (counter_1hz == 2) {
+				/* update display every seconds */
+				/* solar */
+				sprintf(oled_displaybuf, "%2.01fV %2.02fA",
+				    (double)batt_v[2] / 100.0,
+				    (double)batt_i[2] / 100.0);
+				oled_col = 20;
+				oled_line = 0;
+				displaybuf_small();
+				/* batt1 (service) */
+				sprintf(oled_displaybuf, "%2.01fV %2.02fA",
+				    (double)batt_v[1] / 100.0,
+				    (double)batt_i[1] / 100.0);
+				oled_col = 20;
+				oled_line = 3;
+				displaybuf_small();
+				/* batt1 (service) */
+				sprintf(oled_displaybuf, "%2.01fV %2.02fA",
+				    (double)batt_v[0] / 100.0,
+				    (double)batt_i[0] / 100.0);
+				oled_col = 20;
+				oled_line = 6;
+				displaybuf_small();
+			}
+
 			if (counter_1hz == 1)
 				pacops_pending.bits.refresh = 1;
 			else if (counter_1hz & 1)
