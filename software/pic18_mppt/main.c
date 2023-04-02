@@ -908,13 +908,12 @@ displaybuf_small(void)
 	const unsigned char *font;
 	char *cp;
 	unsigned char i;
-	unsigned char n;
 	struct oled_i2c_buf_s *oled_s;
 
-	if ((oled_s = oled_i2c_reset()) == 0)
+	if ((oled_s = oled_i2c_reset()) == NULL)
 		return;
 
-	for (n = 0, cp = oled_displaybuf; *cp != '\0'; cp++, n++) {
+	for (cp = oled_displaybuf; *cp != '\0'; cp++) {
 		font = get_font5x8(*cp);
 		for (i = 0; i < 5; i++) {
 			oled_s->oled_databuf[oled_s->oled_datalen++] = font[i];
@@ -923,7 +922,41 @@ displaybuf_small(void)
 	}
 	/* set column start/end */
 	OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x10);  /* reset column start */
-	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, oled_col); OLED_CTRL(oled_s, oled_col + oled_s->oled_datalen - 1); /*column start/end */
+	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, oled_col);
+	    OLED_CTRL(oled_s, oled_col + (unsigned char)oled_s->oled_datalen - 1); /*column start/end */
+	/* set page address */
+	OLED_CTRL(oled_s, (oled_line & 0x07 ) | 0xb0 );
+	oled_s->oled_type = OLED_CTRL_DISPLAY;
+	if (oled_i2c_state == OLED_I2C_IDLE)
+		oled_i2c_state = OLED_I2C_WAIT;
+}
+
+static void
+displaybuf_medium(void)
+{
+	const unsigned char *font;
+	char *cp;
+	unsigned char i, n;
+	struct oled_i2c_buf_s *oled_s;
+
+	if ((oled_s = oled_i2c_reset()) == NULL)
+		return;
+	/* unfortunably we can't build the two lines in a single loop */
+	for (n = 0, cp = oled_displaybuf; *cp != '\0'; cp++) {
+		font = get_font10x16(*cp);
+		for (i = 0; i < 10; i++, n++) {
+			oled_s->oled_databuf[n] = font[i * 2];
+		}
+	}
+	for (cp = oled_displaybuf; *cp != '\0'; cp++) {
+		font = get_font10x16(*cp);
+		for (i = 0; i < 10; i++, n++) {
+			oled_s->oled_databuf[n] = font[i * 2 + 1];
+		}
+	}
+	oled_s->oled_datalen = n;
+	OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x10);  /* reset column start */
+	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, oled_col); OLED_CTRL(oled_s, oled_col + n / 2 - 1); /*column start/end */
 	/* set page address */
 	OLED_CTRL(oled_s, (oled_line & 0x07 ) | 0xb0 );
 	oled_s->oled_type = OLED_CTRL_DISPLAY;
@@ -939,7 +972,7 @@ displaybuf_icon(char ic)
 	unsigned char i;
 	struct oled_i2c_buf_s *oled_s;
 
-	if ((oled_s = oled_i2c_reset()) == 0)
+	if ((oled_s = oled_i2c_reset()) == NULL)
 		return;
 	icon = get_icons16x16(ic);
 	for (i = 0; i < 16; i++) {
@@ -955,7 +988,6 @@ displaybuf_icon(char ic)
 	if (oled_i2c_state == OLED_I2C_IDLE)
 		oled_i2c_state = OLED_I2C_WAIT;
 }
-
 
 int
 main(void)
@@ -1390,10 +1422,10 @@ again:
 		goto again;
 #endif /* USEPAC */
 
-	oled_col = 40;
-	oled_line = 4;
+	oled_col = 20;
+	oled_line = 5;
 	sprintf(oled_displaybuf, "hello");
-	displaybuf_small();
+	displaybuf_medium();
 	oled_i2c_flush();
 
 	for (c = 0; c < 4; c++) {
