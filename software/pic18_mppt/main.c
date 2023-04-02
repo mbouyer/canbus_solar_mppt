@@ -98,10 +98,10 @@ static enum {
 
 static volatile i2c_return_t i2c_return;
 
-int16_t batt_v[4];
+uint16_t batt_v[4];
 int16_t batt_i[4];
 
-static int32_t voltages_acc[4];
+static uint32_t voltages_acc[4];
 pac_ctrl_t pac_ctrl;
 
 /* for journal */
@@ -164,7 +164,7 @@ static struct {
  */
 static struct {
 	int16_t batt_i[3];
-	int16_t batt_v[3];
+	uint16_t batt_v[3];
 } _read_voltcur;
 
 static enum {
@@ -1697,10 +1697,15 @@ again:
 		c++;
 	}
 
-	pac_neg_pwr_fsr.pwrfsr_vb1 = pac_neg_pwr_fsr.pwrfsr_vs1 = PAC_PWRSFR_BHALF;
-	pac_neg_pwr_fsr.pwrfsr_vb2 = pac_neg_pwr_fsr.pwrfsr_vs2 = PAC_PWRSFR_BHALF;
-	pac_neg_pwr_fsr.pwrfsr_vb3 = pac_neg_pwr_fsr.pwrfsr_vs3 = PAC_PWRSFR_BHALF;
-	pac_neg_pwr_fsr.pwrfsr_vb4 = pac_neg_pwr_fsr.pwrfsr_vs4 = PAC_PWRSFR_BHALF;
+	pac_neg_pwr_fsr.pwrfsr_vs1 = PAC_PWRSFR_BHALF;
+	pac_neg_pwr_fsr.pwrfsr_vs2 = PAC_PWRSFR_BHALF;
+	pac_neg_pwr_fsr.pwrfsr_vs3 = PAC_PWRSFR_BHALF;
+	pac_neg_pwr_fsr.pwrfsr_vs4 = PAC_PWRSFR_BHALF;
+
+	pac_neg_pwr_fsr.pwrfsr_vb1 = PAC_PWRSFR_UFSR;
+	pac_neg_pwr_fsr.pwrfsr_vb2 = PAC_PWRSFR_UFSR;
+	pac_neg_pwr_fsr.pwrfsr_vb3 = PAC_PWRSFR_UFSR;
+	pac_neg_pwr_fsr.pwrfsr_vb4 = PAC_PWRSFR_UFSR;
 	PAC_WRITEREG(PAC_NEG_PWR_FSR, pac_neg_pwr_fsr);
 	if (pac_i2c_flush() == 0) {
 		printf("wr PAC_NEG_PWR_FSR fail\n");
@@ -2001,7 +2006,7 @@ again:
 				/* volt = vbus * 0.000488 */
 				/* batt_v = vbus * 0.000488 * 100 */      
 				v = (double)_read_voltcur.batt_v[c] * 0.0488;
-				batt_v[2 - c] = (int16_t)(v + 0.5);
+				batt_v[2 - c] = (uint16_t)(v + 0.5);
 				// printf(" %4.4fV", v / 100);
 			}
 			// printf("\n");
