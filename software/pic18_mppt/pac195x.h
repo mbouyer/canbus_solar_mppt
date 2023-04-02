@@ -35,11 +35,11 @@
 
 #define PAC_CTRL	0x01
 typedef struct {
+	uint8_t	ctrl_pad	: 4;
+	uint8_t	ctrl_chan_dis	: 4;
 	uint8_t	ctrl_alert1	: 2;
 	uint8_t	ctrl_alert2	: 2;
 	uint8_t	ctrl_mode	: 4;
-	uint8_t	ctrl_pad	: 4;
-	uint8_t	ctrl_chan_dis	: 4;
 } pac_ctrl_t;
 
 #define CTRL_MODE_ADAP_1024	0x0
