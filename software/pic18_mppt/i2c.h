@@ -40,12 +40,19 @@ void i2c_writereg_be(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t 
 void i2c_writecmd(const uint8_t address, uint8_t reg, i2c_return_t *r);
 void i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data, uint16_t size, i2c_return_t *r);
 
+void i2c_abort(void);
+
 static char
 i2c_wait(volatile i2c_return_t *r)
 {
+	int i2c_wait_count = 0;
 	while (*r == I2C_INPROGRESS) {
 		CLRWDT();
-		SLEEP();
+		i2c_wait_count++;
+		if (i2c_wait_count == 30000) {
+			i2c_abort();
+			return 1;
+		}
 	};
 	if (*r == I2C_COMPLETE)
 		return 0;

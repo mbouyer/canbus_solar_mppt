@@ -39,6 +39,7 @@
 typedef volatile enum {
 	I2C_IDLE = 0,
 	I2C_TX,
+	I2C_RX_TXREG,
 	I2C_RX,
 	I2C_TXDMA,
 	I2C_RXDMA,
@@ -46,7 +47,9 @@ typedef volatile enum {
 
 static i2c_status_t i2c_status;
 static i2c_return_t *i2c_return;
+static uint8_t i2c_address;
 static uint8_t *i2c_data;
+static uint8_t i2c_size;
 static __bit i2c_swap;
 
 static void i2c_printstatus(void);
@@ -139,6 +142,25 @@ again:
 	I2C1CNTL = 1;
 	I2C1TXB = reg;
 	I2C1CON0bits.S = 1;
+	i2c_status = I2C_RX_TXREG;
+
+	if (swap) {
+		i2c_data = &data[size - 1];
+		i2c_swap = 1;
+	} else {
+		i2c_data = &data[0];
+		i2c_swap = 0;
+	}
+	i2c_address = address;
+	i2c_size = size;
+	i2c_return = r;
+
+	I2C_IRQEN;
+
+	return;
+#if 0
+
+
 	I2C_WAIT_TX;
 
 	while (!I2C1CON0bits.MDR) {
@@ -169,6 +191,7 @@ again:
 	i2c_return = r;
 	I2C_IRQEN;
 	PIE7bits.I2C1RXIE = 1;
+#endif
 
 #if 0
 	for (i = size ; i != 0; i--) {
@@ -218,6 +241,7 @@ i2c_writereg_s(const uint8_t address, uint8_t reg, uint8_t *data, uint8_t size,
 	}
 
 	*r = I2C_INPROGRESS;
+	i2c_address = address;
 
 	I2C1STAT1bits.CLRBF = 1;
 	I2C1STAT1 = 0;
@@ -278,6 +302,7 @@ i2c_writereg_dma(const uint8_t address, uint8_t reg, uint8_t *data,
 	}
 
 	*r = I2C_INPROGRESS;
+	i2c_address = address;
 	I2C1STAT1bits.CLRBF = 1;
 	I2C1STAT1 = 0;
 	I2C1PIR = 0;
@@ -350,9 +375,32 @@ void __interrupt(__irq(I2C1), __low_priority, base(IVECT_BASE))
 irql_i2c1(void)
 {
 	if (I2C1PIRbits.CNTIF) {
-		I2C_IRQDIS;
-		*i2c_return = I2C_COMPLETE;
-		i2c_status = I2C_IDLE;
+		if (i2c_status == I2C_RX_TXREG) {
+			if (!I2C1CON0bits.MDR) {
+				I2C_IRQDIS;
+				if (I2C1STAT0bits.MMA)
+					I2C1CON1bits.P = 1;
+				*i2c_return = I2C_ERROR;
+				i2c_status = I2C_IDLE;
+				return;
+			}
+			/* read bytes */
+			I2C1PIR = 0;
+			I2C1ERR = 0;
+			I2C1CON0bits.RSEN = 0;
+			I2C1CON1bits.ACKCNT = 1;
+			I2C1CON1bits.ACKDT = 0;
+			I2C1ADB1 = i2c_address | 1;
+			I2C1CNTH = 0;
+			I2C1CNTL = i2c_size;
+			I2C1CON0bits.S = 1;
+			i2c_status = I2C_RX;
+			PIE7bits.I2C1RXIE = 1;
+		} else {
+			I2C_IRQDIS;
+			*i2c_return = I2C_COMPLETE;
+			i2c_status = I2C_IDLE;
+		}
 	}
 }
 
@@ -392,6 +440,15 @@ i2c_init(void)
 	I2C1CON0bits.EN = 1;
 
 	i2c_status = I2C_IDLE;
+}
+
+void
+i2c_abort()
+{
+	printf("I2C@%d abort %d\n", (int)i2c_address, i2c_status);
+	i2c_printstatus();
+	i2c_wait_idle();
+	*i2c_return = I2C_ERROR;
 }
 
 static void
