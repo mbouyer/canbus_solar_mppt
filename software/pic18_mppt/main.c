@@ -166,10 +166,10 @@ static struct {
 
 static enum {
 	PAC_I2C_IDLE,
+	PAC_I2C_ERROR, /* got error */
 	PAC_I2C_WAIT, /* waiting for i2c bus */
 	PAC_I2C_WRITE,/* sending data */
 	PAC_I2C_READ, /* reading data */
-	PAC_I2C_ERROR, /* got error */
 } pac_i2c_state;
 
 static void
@@ -922,10 +922,10 @@ static struct oled_i2c_buf_s {
 
 static enum {
 	OLED_I2C_IDLE,
+	OLED_I2C_ERROR, /* got error */
 	OLED_I2C_WAIT, /* waiting for i2c bus */
 	OLED_I2C_CMD, /* command sent */
 	OLED_I2C_DATA, /* data sent */
-	OLED_I2C_ERROR, /* got error */
 } oled_i2c_state;
 
 static u_char oled_i2c_prod;
@@ -1835,8 +1835,50 @@ again:
 				}
 			}
 		}
-		if (i2c_return != I2C_INPROGRESS)
-			oled_i2c_exec();
+		while (i2c_return != I2C_INPROGRESS) {
+			if (pac_i2c_state < PAC_I2C_WAIT &&
+			    oled_i2c_state < OLED_I2C_WAIT) {
+				break;
+			}
+
+			/*
+			 * pac has higher priority
+			 */
+			 switch(oled_i2c_state) {
+			 case OLED_I2C_CMD:
+			 case OLED_I2C_DATA:
+				oled_i2c_exec();
+				break;
+			 case OLED_I2C_WAIT:
+				if (pac_i2c_state < PAC_I2C_WAIT)
+					oled_i2c_exec();
+				break;
+			default:
+				break;
+			}
+			if (oled_i2c_state == OLED_I2C_ERROR) {
+				printf("oled i2c error\n"); // XXX
+				oled_i2c_state = OLED_I2C_IDLE;
+				oled_i2c_buf[oled_i2c_cons].oled_type = OLED_CTRL_FREE;
+			}
+			 switch(pac_i2c_state) {
+			 case PAC_I2C_READ:
+			 case PAC_I2C_WRITE:
+				pac_i2c_exec();
+				break;
+			 case PAC_I2C_WAIT:
+				if (oled_i2c_state <= OLED_I2C_WAIT)
+					pac_i2c_exec();
+				break;
+			default:
+				break;
+			}
+			if (pac_i2c_state == PAC_I2C_ERROR) {
+				printf("pac i2c error\n"); // XXX
+				pac_i2c_state = PAC_I2C_IDLE;
+				pac_i2c_io.pac_type = PAC_FREE;
+			}
+		}
 		if (PIR4bits.U1RXIF && (U1RXB == 'r'))
 			break;
 		if (softintrs.byte == 0)
