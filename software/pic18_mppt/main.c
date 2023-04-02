@@ -72,6 +72,8 @@ static volatile union softintrs {
 		char int_btn_down : 1;	/* button release->press */
 		char int_btn_up : 1;	/* button press->release */
 		char int_adcc : 1;	/* A/D convertion complete */
+		char int_pacavg : 1;	/* pac average values updated */
+		char int_pacacc : 1;	/* pac accum values updated */
 	} bits;
 	char byte;
 } softintrs;
@@ -152,21 +154,23 @@ static struct pac_i2c_io {
  */
 static struct { 
 	u_char accum[3*7]; 
-	uint16_t acc_count;
+	pac_acccnt_t acc_count;
 } _read_accum;
 
 /*
  * buffer to read voltage/current values at once 
  * as we're using readreg_be, the register order is inverted
+ * Disabled channels are skipped, so only 3 entries
  */
 static struct {
-	int16_t batt_i[4];
-	int16_t batt_v[4];
+	int16_t batt_i[3];
+	int16_t batt_v[3];
 } _read_voltcur;
 
 static enum {
 	PAC_I2C_IDLE,
 	PAC_I2C_ERROR, /* got error */
+	PAC_I2C_COMPLETE, /* transaction complete */
 	PAC_I2C_WAIT, /* waiting for i2c bus */
 	PAC_I2C_WRITE,/* sending data */
 	PAC_I2C_READ, /* reading data */
@@ -177,6 +181,8 @@ pac_i2c_exec(void)
 {
 	switch(pac_i2c_state) {
 	case PAC_I2C_IDLE:
+	case PAC_I2C_COMPLETE:
+	case PAC_I2C_ERROR:
 		return;
 	case PAC_I2C_WAIT:
 		switch(pac_i2c_io.pac_type) {
@@ -213,8 +219,7 @@ pac_i2c_exec(void)
 		case I2C_INPROGRESS:
 			return;
 		case I2C_COMPLETE:
-			pac_i2c_io.pac_type = PAC_FREE;
-			pac_i2c_state = PAC_I2C_IDLE;
+			pac_i2c_state = PAC_I2C_COMPLETE;
 			return;
 		case I2C_ERROR:
 			/* XXX */
@@ -223,8 +228,6 @@ pac_i2c_exec(void)
 			pac_i2c_state = PAC_I2C_ERROR;
 			return;
 		}
-	case PAC_I2C_ERROR:
-		return;
 	}
 }
 
@@ -238,11 +241,13 @@ pac_i2c_flush(void)
 			    i2c_return, pac_i2c_state, pac_i2c_io.pac_type);
 			return 0;
 		}
+		if (pac_i2c_state == PAC_I2C_COMPLETE)
+			pac_i2c_state = PAC_I2C_IDLE;
 		i2c_wait(&i2c_return); /* will deal with timeout */
 	}
+	pac_i2c_io.pac_type = PAC_FREE;
 	return 1;
 }
-
 /*
  * journal data structure (record every 10mn)
  * For current, in mA: 18 bits, including sign
@@ -827,6 +832,82 @@ putch(char c)
 	}
 }
 
+static union pacops_pending {
+	struct pacops_bits {
+		char refresh : 1;	/* send a refresh command */
+		char refresh_v : 1;	/* send a refresh_v command */
+		char read_values : 1;	/* read average values */
+		char read_accum : 1;	/* read accumulator values */
+	} bits;
+	char byte;
+} pacops_pending;
+
+u_int pac_refresh_time;
+u_char pac_refresh_valid;
+
+static void
+pac_command_complete(void)
+{
+	switch(pac_i2c_io.pac_type) {
+	case PAC_WRITE:
+		if (pac_i2c_io.pac_reg == PAC_REFRESH ||
+		    pac_i2c_io.pac_reg == PAC_REFRESH_V) {
+			pac_refresh_time = timer0_read();
+			pac_refresh_valid = 1;
+		}
+		break;
+	case PAC_READ_AVG:
+		softintrs.bits.int_pacavg = 1;
+		break;
+	case PAC_READ_ACCUM:
+		softintrs.bits.int_pacacc = 1;
+		break;
+	default:
+		printf("unknown pac_complete %d\n", pac_i2c_io.pac_type);
+		break;
+	}
+	pac_i2c_io.pac_type = PAC_FREE;
+	pac_i2c_state = PAC_I2C_IDLE;
+}
+
+static void
+pac_command_schedule(void)
+{
+	if (pac_i2c_state != PAC_I2C_IDLE)
+		return;
+
+	if (pacops_pending.bits.refresh) {
+		pacops_pending.bits.refresh_v = 0;
+		pacops_pending.bits.refresh = 0;
+		pac_refresh_valid = 0;
+		PAC_WRITECMD(PAC_REFRESH);
+		return;
+	}
+	if (pacops_pending.bits.refresh_v) {
+		pacops_pending.bits.refresh_v = 0;
+		PAC_WRITECMD(PAC_REFRESH_V);
+		pac_refresh_valid = 0;
+		return;
+	}
+	if ((pacops_pending.bits.read_values ||
+	    pacops_pending.bits.read_accum) && pac_refresh_valid) {
+		if ((timer0_read() - pac_refresh_time) < TIMER0_1MS)
+			return;
+		if (pacops_pending.bits.read_values) {
+			pacops_pending.bits.read_values = 0;
+			pac_i2c_io.pac_type = PAC_READ_AVG;
+			softintrs.bits.int_pacavg = 0;
+		} else {
+			pacops_pending.bits.read_accum = 0;
+			pac_i2c_io.pac_type = PAC_READ_ACCUM;
+			softintrs.bits.int_pacacc = 0;
+		}
+		pac_i2c_state = PAC_I2C_WAIT;
+		return;
+	}
+}
+
+#if 0
 static void
 read_pac_channel(void)
 {
@@ -885,6 +966,7 @@ read_pac_channel(void)
 		printf(" %4.3fV", v / 100);
 	}
 }
+#endif
 
 #define OLED_ADDR 0x78 // 0b01111000
 #define OLED_DISPLAY_SIZE 1024 /* 128 * 64 / 8 */
@@ -923,6 +1005,7 @@ static struct oled_i2c_buf_s {
 static enum {
 	OLED_I2C_IDLE,
 	OLED_I2C_ERROR, /* got error */
+	OLED_I2C_COMPLETE, /* transaction complete */
 	OLED_I2C_WAIT, /* waiting for i2c bus */
 	OLED_I2C_CMD, /* command sent */
 	OLED_I2C_DATA, /* data sent */
@@ -938,6 +1021,8 @@ _oled_i2c_exec(void)
 
 	switch(oled_i2c_state) {
 	case OLED_I2C_IDLE:
+	case OLED_I2C_COMPLETE:
+	case OLED_I2C_ERROR:
 		return;
 	case OLED_I2C_WAIT:
 		while (oled_i2c_buf[oled_i2c_cons].oled_type == OLED_CTRL_FREE) {
@@ -972,8 +1057,7 @@ _oled_i2c_exec(void)
 			oled_i2c_state = OLED_I2C_DATA;
 			return;
 		case OLED_CTRL_CMD:
-			oled_i2c_state = OLED_I2C_IDLE;
-			oled_s->oled_type = OLED_CTRL_FREE;
+			oled_i2c_state = OLED_I2C_COMPLETE;
 			return;
 		case OLED_CTRL_CLEAR:
 			break;
@@ -999,8 +1083,7 @@ _oled_i2c_exec(void)
 		}
 		switch(oled_s->oled_type) {
 		case OLED_CTRL_DISPLAY:
-			oled_i2c_state = OLED_I2C_IDLE;
-			oled_s->oled_type = OLED_CTRL_FREE;
+			oled_i2c_state = OLED_I2C_COMPLETE;
 			return;
 		case OLED_CTRL_CLEAR:
 			if (oled_s->oled_datalen != 0) {
@@ -1010,15 +1093,12 @@ _oled_i2c_exec(void)
 				oled_s->oled_datalen -= OLED_I2C_DATABUFSZ;
 				oled_i2c_state = OLED_I2C_DATA;
 			} else {
-				oled_i2c_state = OLED_I2C_IDLE;
-				oled_s->oled_type = OLED_CTRL_FREE;
+				oled_i2c_state = OLED_I2C_COMPLETE;
 			}
 			return;
 		default:
 			break;
 		}
-	case OLED_I2C_ERROR:
-		return;
 	default:
 		printf("oled_i2c_exec: state %d cons %d cons_state %d\n",
 		    oled_i2c_state, oled_i2c_cons,
@@ -1030,6 +1110,10 @@ static void
 oled_i2c_exec(void)
 {
 	_oled_i2c_exec();
+	if (oled_i2c_state == OLED_I2C_COMPLETE) {
+		oled_i2c_buf[oled_i2c_cons].oled_type = OLED_CTRL_FREE;
+		oled_i2c_state = OLED_I2C_IDLE;
+	}
 	if (oled_i2c_state == OLED_I2C_IDLE &&
 	    oled_i2c_cons != oled_i2c_prod) {
 		/* schedule next command */
@@ -1463,6 +1547,7 @@ main(void)
 	printf(" done\n");
 
 	NDOWN = 1;
+	pacops_pending.byte = 0;
 	/* wait 50ms for pac1953 to be up */
 	for (c = 0; c < 50; c++) {
 		t0 = timer0_read();
@@ -1559,6 +1644,7 @@ again:
 
 	pac_ctrl.ctrl_alert1 = pac_ctrl.ctrl_alert2 = CTRL_ALERT_ALERT;
 	pac_ctrl.ctrl_mode = CTRL_MODE_1024;
+	pac_ctrl.ctrl_chan_dis = 0x1;
 
 	PAC_WRITEREG(PAC_CTRL, pac_ctrl);
 	if (pac_i2c_flush() == 0) {
@@ -1756,66 +1842,23 @@ again:
 
 		if (softintrs.bits.int_10hz) {
 			softintrs.bits.int_10hz = 0;
-#ifdef USEPAC
-			/* read voltage values */
-			for (c = 0; c < 4; c++) {
-				pac_vbus_t pac_vbus;
-				if ((pac_ctrl.ctrl_chan_dis & (8 >> c)) != 0)
-					continue;
-				if (i2c_readreg_be(PAC_I2C_ADDR,
-				    PAC_VBUS1_AVG + c,
-				    &pac_vbus, sizeof(pac_vbus)) ==
-				    sizeof(pac_vbus))
-					voltages_acc_cur[c] += pac_vbus.vbus_s;
-				else
-					printf("read v[%d] fail\n", c);
-			}
-#endif /* USEPAC */
 			counter_1hz--;
-#ifdef USEPAC
-			switch(counter_1hz) {
-			case 6:
-				/*
-				 * get new values in registers and reset
-				  * accumulator. Also freeze software voltage
-				  * accumulator.
-				  */
-				if (i2c_writecmd(PAC_I2C_ADDR,
-				    PAC_REFRESH) == 0)
-					printf("PAC_REFRESH fail\n");
-				for (c = 0; c < 4; c++) {
-					voltages_acc[c] = voltages_acc_cur[c];
-					l600_voltages_acc[c] +=
-					    voltages_acc_cur[c];
-					voltages_acc_cur[c] = 0;
-				}
-				SIDINC(sid);
-				break;
-			case 5:
-				read_pac_channel();
-				/* FALLTHROUGH */
-			case 4:
-			case 3:
-			case 2:
-				send_batt_status(counter_1hz - 2);
-				/* FALLTHROUGH */
-			default:
-				/* get new values for next voltage read */
-				if (i2c_writecmd(PAC_I2C_ADDR,
-				    PAC_REFRESH_V) == 0)
-					printf("PAC_REFRESH_V fail\n");
-			}
-#endif /* USEPAC */
+			if (counter_1hz == 1)
+				pacops_pending.bits.refresh = 1;
+			else if (counter_1hz & 1)
+				pacops_pending.bits.refresh_v = 1;
+			else
+				pacops_pending.bits.read_values = 1;
 
 			if (counter_1hz == 0) {
 				counter_1hz = 10;
+				pacops_pending.bits.read_accum = 1;
 				seconds++;
 				if (seconds == 600) {
 					// USELOG update_log();
 					seconds = 0;
 				}
 				// USEADC  ADCON0bits.ADON = 1; /* start a new cycle */
-			} else {
 			}
 			if (ADCON0bits.ADON)
 				ADCON0bits.GO = 1;
@@ -1835,6 +1878,50 @@ again:
 				}
 			}
 		}
+		if (softintrs.bits.int_pacacc) {
+			int64_t acc_value;
+			double v;
+			char *acc_bytes = (void *)&acc_value;
+			softintrs.bits.int_pacacc = 0;
+			// printf("acc %ld", _read_accum.acc_count.acccnt_count);
+			l600_current_count += _read_accum.acc_count.acccnt_count;
+			for (c = 0; c < 3; c++) {
+				acc_bytes[7] = 0;
+				for (char b = 0; b < 7; b++) {
+					acc_bytes[b] =
+					    _read_accum.accum[c * 7 + b];
+				}
+				if (acc_value & 0x0080000000000000) {
+					/* adjust negative value */
+					acc_value |= 0xff00000000000000;
+				}
+				l600_current_acc[2 - c] += acc_value;
+				/* batt_i = acc_value * 0.00075 * 100 */
+				v = (double)acc_value * 0.075 / _read_accum.acc_count.acccnt_count;
+		                // printf(" %4.4fA", v / 100);
+
+			}
+			// printf("\n");
+				
+			// printf("avg");
+			for (c = 0; c < 3; c++) {
+				/* i = acc_value * 0.00075 */
+				/* batt_i = acc_value * 0.00075 * 100 */
+				v = (double)_read_voltcur.batt_i[c] * 0.075;
+				batt_i[2 - c] = (int16_t)(v + 0.5);
+				// printf(" %4.4fA", v / 100);
+				/* volt = vbus * 0.000488 */
+				/* batt_v = vbus * 0.000488 * 100 */      
+				v = (double)_read_voltcur.batt_v[c] * 0.0488;
+				batt_v[2 - c] = (int16_t)(v + 0.5);
+				// printf(" %4.4fV", v / 100);
+			}
+			// printf("\n");
+		}
+		if (softintrs.bits.int_pacavg) {
+			softintrs.bits.int_pacavg = 0;
+		}
+		pac_command_schedule();
 		while (i2c_return != I2C_INPROGRESS) {
 			if (pac_i2c_state < PAC_I2C_WAIT &&
 			    oled_i2c_state < OLED_I2C_WAIT) {
@@ -1877,8 +1964,12 @@ again:
 				printf("pac i2c error\n"); // XXX
 				pac_i2c_state = PAC_I2C_IDLE;
 				pac_i2c_io.pac_type = PAC_FREE;
+			} else if (pac_i2c_state == PAC_I2C_COMPLETE) {
+				pac_command_complete();
+				pac_command_schedule();
 			}
 		}
+
 		if (PIR4bits.U1RXIF && (U1RXB == 'r'))
 			break;
 		if (softintrs.byte == 0)
