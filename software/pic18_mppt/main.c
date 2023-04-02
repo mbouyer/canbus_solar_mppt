@@ -74,21 +74,6 @@ static volatile union softintrs {
 
 static uint16_t a2d_acc;
 
-#define OLED_ADDR 0x78 // 0b01111000
-#define OLED_DISPLAY_SIZE 1024 /* 128 * 64 / 8 */
-#define OLED_DISPLAY_W 128
-#define OLED_DISPLAY_H (64 / 8)
-
-#define DISPLAY_FONTSMALL_W     6
-
-char oled_displaybuf[OLED_DISPLAY_W / DISPLAY_FONTSMALL_W];
-static unsigned char oled_col;
-static unsigned char oled_line;
-
-#define OLED_RSTN	LATAbits.LATA4
-
-unsigned char bright;
-
 #define PAC_I2C_ADDR 0x2e
 #define NDOWN LATCbits.LATC7
 
@@ -756,6 +741,21 @@ read_pac_channel(void)
 	}
 }
 
+#define OLED_ADDR 0x78 // 0b01111000
+#define OLED_DISPLAY_SIZE 1024 /* 128 * 64 / 8 */
+#define OLED_DISPLAY_W 128
+#define OLED_DISPLAY_H (64 / 8)
+
+#define DISPLAY_FONTSMALL_W     6
+
+char oled_displaybuf[OLED_DISPLAY_W / DISPLAY_FONTSMALL_W];
+static unsigned char oled_col;
+static unsigned char oled_line;
+
+#define OLED_RSTN	LATAbits.LATA4
+
+unsigned char bright;
+
 /* i2c OLED specific */
 
 #define OLED_I2C_DATABUFSZ	256
@@ -919,10 +919,11 @@ displaybuf_small(void)
 		for (i = 0; i < 5; i++) {
 			oled_s->oled_databuf[oled_s->oled_datalen++] = font[i];
 		}
+		oled_s->oled_databuf[oled_s->oled_datalen++] = 0;
 	}
 	/* set column start/end */
 	OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x10);  /* reset column start */
-	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, oled_col); OLED_CTRL(oled_s, oled_col + n * 5 - 1); /*column start/end */
+	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, oled_col); OLED_CTRL(oled_s, oled_col + oled_s->oled_datalen - 1); /*column start/end */
 	/* set page address */
 	OLED_CTRL(oled_s, (oled_line & 0x07 ) | 0xb0 );
 	oled_s->oled_type = OLED_CTRL_DISPLAY;
