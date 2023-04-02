@@ -169,6 +169,7 @@ static enum {
 	PAC_I2C_WAIT, /* waiting for i2c bus */
 	PAC_I2C_WRITE,/* sending data */
 	PAC_I2C_READ, /* reading data */
+	PAC_I2C_ERROR, /* got error */
 } pac_i2c_state;
 
 static void
@@ -217,12 +218,13 @@ pac_i2c_exec(void)
 			return;
 		case I2C_ERROR:
 			/* XXX */
-			printf("pac command %d fail\n", 
-			    pac_i2c_io.pac_type);
-			pac_i2c_io.pac_type = PAC_FREE;
-			pac_i2c_state = PAC_I2C_IDLE;
+			printf("pac command %d %d fail\n", 
+			    pac_i2c_io.pac_type, pac_i2c_io.pac_reg);
+			pac_i2c_state = PAC_I2C_ERROR;
 			return;
 		}
+	case PAC_I2C_ERROR:
+		return;
 	}
 }
 
@@ -231,11 +233,12 @@ pac_i2c_flush(void)
 {
 	while (pac_i2c_state != PAC_I2C_IDLE) {
 		pac_i2c_exec();
-		if (i2c_wait(&i2c_return) != 0) {
+		if (pac_i2c_state == PAC_I2C_ERROR) {
 			printf("pac_i2c_flush: error %d state %d io_state %d\n",
 			    i2c_return, pac_i2c_state, pac_i2c_io.pac_type);
 			return 0;
 		}
+		i2c_wait(&i2c_return); /* will deal with timeout */
 	}
 	return 1;
 }
@@ -922,6 +925,7 @@ static enum {
 	OLED_I2C_WAIT, /* waiting for i2c bus */
 	OLED_I2C_CMD, /* command sent */
 	OLED_I2C_DATA, /* data sent */
+	OLED_I2C_ERROR, /* got error */
 } oled_i2c_state;
 
 static u_char oled_i2c_prod;
@@ -950,6 +954,17 @@ _oled_i2c_exec(void)
 		return;
 	case OLED_I2C_CMD:
 		oled_s = &oled_i2c_buf[oled_i2c_cons];
+		switch(i2c_return) {
+		case I2C_INPROGRESS:
+			return;
+		case I2C_ERROR:
+			printf("oled_i2c_exec CMD fail (%d)\n",
+			    oled_s->oled_type);
+			oled_i2c_state = OLED_I2C_ERROR;
+			return;
+		case I2C_COMPLETE:
+			break;
+		}
 		switch(oled_s->oled_type) {
 		case OLED_CTRL_DISPLAY:
 			i2c_writereg_dma(OLED_ADDR, 0x40, &oled_s->oled_databuf[0],
@@ -971,6 +986,17 @@ _oled_i2c_exec(void)
 		/* FALLTHROUGH */
 	case OLED_I2C_DATA:
 		oled_s = &oled_i2c_buf[oled_i2c_cons];
+		switch(i2c_return) {
+		case I2C_INPROGRESS:
+			return;
+		case I2C_ERROR:
+			printf("oled_i2c_exec DATA fail (%d)\n",
+			    oled_s->oled_type);
+			oled_i2c_state = OLED_I2C_ERROR;
+			return;
+		case I2C_COMPLETE:
+			break;
+		}
 		switch(oled_s->oled_type) {
 		case OLED_CTRL_DISPLAY:
 			oled_i2c_state = OLED_I2C_IDLE;
@@ -991,6 +1017,8 @@ _oled_i2c_exec(void)
 		default:
 			break;
 		}
+	case OLED_I2C_ERROR:
+		return;
 	default:
 		printf("oled_i2c_exec: state %d cons %d cons_state %d\n",
 		    oled_i2c_state, oled_i2c_cons,
@@ -1015,12 +1043,15 @@ oled_i2c_flush(void)
 {
 	while (oled_i2c_state != OLED_I2C_IDLE) {
 		oled_i2c_exec();
-		if (i2c_wait(&i2c_return) != 0) {
+		if (oled_i2c_state == OLED_I2C_ERROR) {
 			printf("oled_i2c_flush: error %d state %d cons %d cons_state %d\n",
 			    i2c_return, oled_i2c_state, oled_i2c_cons,
 			    oled_i2c_buf[oled_i2c_cons].oled_type);
+			oled_i2c_state = OLED_I2C_IDLE;
+			oled_i2c_buf[oled_i2c_cons].oled_type = OLED_CTRL_FREE;
 			return 0;
 		}
+		i2c_wait(&i2c_return); /* will deal with timeout */
 	}
 	return 1;
 }
@@ -1526,7 +1557,6 @@ again:
 		    pac_ctrl.ctrl_chan_dis);
 	}
 
-#ifdef USEPAC
 	pac_ctrl.ctrl_alert1 = pac_ctrl.ctrl_alert2 = CTRL_ALERT_ALERT;
 	pac_ctrl.ctrl_mode = CTRL_MODE_1024;
 
@@ -1563,7 +1593,6 @@ again:
 	}
 	if (c != 0)
 		goto again;
-#endif /* USEPAC */
 
 	oled_col = 20;
 	oled_line = 5;
