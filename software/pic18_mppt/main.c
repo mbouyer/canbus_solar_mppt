@@ -1168,23 +1168,31 @@ displaybuf_small(void)
 {
 	const u_char *font;
 	char *cp;
+	u_char len;
 	u_char i;
 	struct oled_i2c_buf_s *oled_s;
 
 	if ((oled_s = oled_i2c_reset()) == NULL)
 		return;
 
+	len = 0;
 	for (cp = oled_displaybuf; *cp != '\0'; cp++) {
+		if (*cp == '\n' && len == 0) {
+			len = (u_char)oled_s->oled_datalen;
+			continue;
+		}
 		font = get_font5x8(*cp);
 		for (i = 0; i < 5; i++) {
 			oled_s->oled_databuf[oled_s->oled_datalen++] = font[i];
 		}
 		oled_s->oled_databuf[oled_s->oled_datalen++] = 0;
 	}
+	if (len == 0)
+		len = (u_char)oled_s->oled_datalen;
 	/* set column start/end */
 	OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x10);  /* reset column start */
 	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, oled_col);
-	    OLED_CTRL(oled_s, oled_col + (u_char)oled_s->oled_datalen - 1); /*column start/end */
+	    OLED_CTRL(oled_s, oled_col + len - 1); /*column start/end */
 	/* set page address */
 	OLED_CTRL(oled_s, (oled_line & 0x07 ) | 0xb0 );
 	oled_s->oled_type = OLED_CTRL_DISPLAY;
@@ -1248,6 +1256,31 @@ displaybuf_icon(char ic)
 	oled_s->oled_type = OLED_CTRL_DISPLAY;
 	if (oled_i2c_state == OLED_I2C_IDLE)
 		oled_i2c_state = OLED_I2C_WAIT;
+}
+
+static void
+dislplay_battstat(u_char b)
+{
+	double amps = (double)batt_i[b] / 100;
+	double volts = (double)batt_v[b] / 100;
+	if (amps > 9.99 || amps < 0) {
+		if (volts < 10.0) {
+			sprintf(oled_displaybuf,
+			    " %1.01fV\n-.--A", volts);
+		} else {
+			sprintf(oled_displaybuf,
+			    "%2.01fV\n-.--A", volts);
+		}
+	} else {
+		if (volts < 10.0) {
+			sprintf(oled_displaybuf,
+			    " %1.01fV\n%1.02fA", volts, amps);
+		} else {
+			sprintf(oled_displaybuf,
+			    "%2.01fV\n%1.02fA", volts, amps);
+		}
+	}
+	displaybuf_small();
 }
 
 int
@@ -1882,28 +1915,20 @@ again:
 			softintrs.bits.int_10hz = 0;
 			counter_1hz--;
 			if (counter_1hz == 2) {
+				double amps;
 				/* update display every seconds */
 				/* solar */
-				sprintf(oled_displaybuf, "%2.01fV %2.02fA",
-				    (double)batt_v[2] / 100.0,
-				    (double)batt_i[2] / 100.0);
 				oled_col = 20;
 				oled_line = 0;
-				displaybuf_small();
+				dislplay_battstat(2);
 				/* batt1 (service) */
-				sprintf(oled_displaybuf, "%2.01fV %2.02fA",
-				    (double)batt_v[1] / 100.0,
-				    (double)batt_i[1] / 100.0);
 				oled_col = 20;
 				oled_line = 3;
-				displaybuf_small();
-				/* batt1 (service) */
-				sprintf(oled_displaybuf, "%2.01fV %2.02fA",
-				    (double)batt_v[0] / 100.0,
-				    (double)batt_i[0] / 100.0);
+				dislplay_battstat(1);
+				/* batt2 (engine) */
 				oled_col = 20;
 				oled_line = 6;
-				displaybuf_small();
+				dislplay_battstat(0);
 			}
 
 			if (counter_1hz == 1)
