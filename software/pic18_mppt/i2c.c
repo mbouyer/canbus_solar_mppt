@@ -433,9 +433,9 @@ i2c_init(void)
 	TRISCbits.TRISC4 = 0;
 	I2C1CON0 = 0x04; /* On, 7 bits I2C host mode */
 	I2C1CON1 = 0;
-	I2C1CON2 = 0; /* address buffer enabled */
+	I2C1CON2 = 0x04; /* FME, address buffer enabled, 100ns SDA hold */
 	I2C1CLK = 1; /* clock = fosc  (10000khz) */
-	I2C1BAUD = 9; /* prescale = 10 -> clk = 200Khz */
+	I2C1BAUD = 4; /* prescale = 5 -> clk = 500Khz */
 	I2C1ERR = 0x01; /* enable NACK interrupt */
 	I2C1CON0bits.EN = 1;
 
