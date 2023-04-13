@@ -61,7 +61,29 @@ u_int timer0_read(void);
 #define TIMER0_5MS 48
 #define TIMER0_1MS 10
 
-#define NCANOK PORTCbits.RC2
+#define NCANOK  PORTCbits.RC2
+
+#define PWM_OFF   LATCbits.LATC1
+#define PWM_OK    PORTCbits.RC0
+#define PWM_MID   LATCbits.LATC5 /* high-side resistor for 3-state PWM output */
+#define PWM_OUT   LATCbits.LATC6 /* PWM output */
+#define PAC_NDOWN LATCbits.LATC7
+
+#define OLED_RSTN LATAbits.LATA4
+
+static void
+batt1_en(char on)
+{
+	CLCSELECT = 2;
+	CLCnPOLbits.G2POL = on;
+}
+
+static void
+batt2_en(char on)
+{
+	CLCSELECT = 3;
+	CLCnPOLbits.G2POL = on;
+}
 
 static char counter_10hz;
 static char counter_1hz;
@@ -94,7 +116,6 @@ static enum {
 
 
 #define PAC_I2C_ADDR 0x2e
-#define NDOWN LATCbits.LATC7
 
 static volatile i2c_return_t i2c_return;
 
@@ -248,6 +269,7 @@ pac_i2c_flush(void)
 	pac_i2c_io.pac_type = PAC_FREE;
 	return 1;
 }
+
 /*
  * journal data structure (record every 10mn)
  * For current, in mA: 18 bits, including sign
@@ -656,7 +678,7 @@ send_batt_status(char c)
 	msg.id.priority = NMEA2000_PRIORITY_INFO;
 	msg.dlc = sizeof(struct nmea2000_battery_status_data);
 	msg.data = &nmea2000_data[0];
-	data->voltage = batt_v[c];
+	data->voltage = (int16_t)batt_v[c];
 	data->current = batt_i[c];
 	data->temp = board_temp;
 	data->sid = sid;
@@ -979,7 +1001,7 @@ char oled_displaybuf[OLED_DISPLAY_W / DISPLAY_FONTSMALL_W];
 static u_char oled_col;
 static u_char oled_line;
 
-#define OLED_RSTN	LATAbits.LATA4
+char oled_error; /* is display in error state ? */
 
 u_char bright;
 
@@ -1043,11 +1065,14 @@ _oled_i2c_exec(void)
 		case I2C_INPROGRESS:
 			return;
 		case I2C_ERROR:
-			printf("oled_i2c_exec CMD fail (%d)\n",
-			    oled_s->oled_type);
+			if (!oled_error)
+				printf("oled_i2c_exec CMD fail (%d)\n",
+				    oled_s->oled_type);
 			oled_i2c_state = OLED_I2C_ERROR;
+			oled_error = 1;
 			return;
 		case I2C_COMPLETE:
+			oled_error = 0;
 			break;
 		}
 		switch(oled_s->oled_type) {
@@ -1074,9 +1099,11 @@ _oled_i2c_exec(void)
 		case I2C_INPROGRESS:
 			return;
 		case I2C_ERROR:
-			printf("oled_i2c_exec DATA fail (%d)\n",
-			    oled_s->oled_type);
+			if (!oled_error)
+				printf("oled_i2c_exec DATA fail (%d)\n",
+				    oled_s->oled_type);
 			oled_i2c_state = OLED_I2C_ERROR;
+			oled_error = 1;
 			return;
 		case I2C_COMPLETE:
 			break;
@@ -1133,9 +1160,10 @@ oled_i2c_flush(void)
 			    oled_i2c_buf[oled_i2c_cons].oled_type);
 			oled_i2c_state = OLED_I2C_IDLE;
 			oled_i2c_buf[oled_i2c_cons].oled_type = OLED_CTRL_FREE;
-			return 0;
+			oled_i2c_exec();
+		} else {
+			i2c_wait(&i2c_return); /* will deal with timeout */
 		}
-		i2c_wait(&i2c_return); /* will deal with timeout */
 	}
 	return 1;
 }
@@ -1318,7 +1346,7 @@ main(void)
 	asm("movff TABLAT, _devid + 1;");
 
 	/* disable unused modules */
-	PMD0 = 0x3a; /* keep clock, FVR,  and IOC */
+	PMD0 = 0x3a; /* keep clock, FVR, and IOC */
 #ifdef USE_TIMER2
 	PMD1 = 0xfa; /* keep timer0/timer2 */
 	PMD2 = 0x03; /* keep can module */
@@ -1326,16 +1354,17 @@ main(void)
 	PMD1 = 0xfe; /* keep timer0 */
 	PMD2 = 0x02; /* keep can module, TU16A */
 #endif
-	PMD3 = 0xdd; /* keep ADC, CM1 */
+	PMD3 = 0xd9; /* keep ADC, CM1, CM2 */
 	PMD4 = 0xff;
 	PMD5 = 0xff;
 	PMD6 = 0xf6; /* keep UART1 and I2C */
-	PMD7 = 0xff;
+	PMD7 = 0xf3; /* keep CLC3 and CLC4 */
 	PMD8 = 0xfe; /* keep DMA1 */
 
 	ANSELC = 0;
-
 	ANSELB = 0;
+	ANSELA = 0x2F; /* RA0, RA1, RA2, RA3 and RA5 analog */
+
 	/* CANRX on RB3 */
 	CANRXPPS = 0x0B;
 	/* CANTX on RB2 */
@@ -1343,10 +1372,9 @@ main(void)
 	TRISBbits.TRISB2 = 0;
 	RB2PPS = 0x46;
 
-	ANSELA = 0x2F; /* RA0, RA1, RA2, RA3 and RA5 analog */
 	LATA = 0;
 	OLED_RSTN = 0;
-	NDOWN = 0;
+	PAC_NDOWN = 0;
 	TRISAbits.TRISA4 = 0; /* RA4/OLED_RSTN as outpout */
 	TRISCbits.TRISC7 = 0; /* RC7/NDOWN output */
 
@@ -1500,6 +1528,7 @@ main(void)
 
 	printf("display init");
 	oled_i2c_prod = oled_i2c_cons = 0;
+	oled_error = 0;
 	oled_i2c_state = OLED_I2C_IDLE;
 	for (c = 0; c < OLED_NBUFS; c++) {
 		oled_i2c_buf[c].oled_type = OLED_CTRL_FREE;
@@ -1581,7 +1610,7 @@ main(void)
 	CLRWDT();
 	printf(" done\n");
 
-	NDOWN = 1;
+	PAC_NDOWN = 1;
 	pacops_pending.byte = 0;
 	/* wait 50ms for pac1953 to be up */
 	for (c = 0; c < 50; c++) {
@@ -1720,6 +1749,75 @@ again:
 	if (c != 0)
 		goto again;
 
+	/* set up some of our input/output */
+	PWM_OFF = 1;
+	TRISCbits.TRISC1 = 0;
+
+	PWM_MID = 0;
+	TRISCbits.TRISC5 = 0;
+	PWM_OUT = 0;
+	TRISCbits.TRISC6 = 0;
+
+	TRISCbits.TRISC0 = 1; /* PWM_OK input */
+
+
+	LATBbits.LATB4 = 1; /* BATT1_ON */
+	LATBbits.LATB5 = 1; /* BATT2_ON */
+	TRISBbits.TRISB4 = 0;
+	TRISBbits.TRISB5 = 0;
+
+#if 0
+
+	/*
+	 * set up CLC for BATT1/BATT2 outputs:
+	 * On only if
+	 *   - PWM_OFF == 0
+	 *   - PWM_OK == 1
+	 *   - PWM_MID == 1
+	 *   - the other batt is off
+	 *   - we want it on
+	 */
+
+	/* CLC inputs - carefull with what port is allowed on which CLCIN */
+	CLCIN0PPS = 0x10; /* RC0 PWM_OK */
+	CLCIN1PPS = 0x11; /* RC1 PWM_OFF */
+	CLCIN2PPS = 0x0c; /* RB4 BATT1_ON */
+	CLCIN3PPS = 0x0d; /* RB5 BATT2_ON */
+	CLCIN4PPS = 0x15; /* RC5 PWM_MID */
+
+	/* setup CLC3 for BATT1_ON */
+	CLCSELECT = 2;
+	CLCnCON = 0x02; /* 4 input and */
+	CLCnPOL = 0x0d; /* 2 noninverted; 1, 3 & 4 inverted */
+	CLCnSEL0 = 0; /* CLCIN0PPS = PWM_OK */
+	CLCnSEL1 = 1; /* CLCIN1PPS = PWM_OFF */
+	CLCnSEL2 = 3; /* CLCIN3PPS = BATT2_ON */
+	CLCnSEL3 = 4; /* CLCIN4PPS = PWM_MID */
+
+	CLCnGLS0 = 0x69; /* b01101001 (!PWM_MID|BATT2_ON|PWM_OFF|!PWM_OK) */
+	CLCnGLS1 = 0;
+	CLCnGLS2 = 0;
+	CLCnGLS3 = 0;
+	CLCnCONbits.EN = 1;
+	RB4PPS = 0x03; /* BATT1_ON = CLC3OUT */
+
+	/* setup CLC4 for BATT2_ON */
+	CLCSELECT = 3;
+	CLCnCON = 0x02; /* 4 input and */
+	CLCnPOL = 0x0d; /* 2 noninverted; 1, 3 & 4 inverted */
+	CLCnSEL0 = 0; /* CLCIN0PPS = PWM_OK */
+	CLCnSEL1 = 1; /* CLCIN1PPS = PWM_OFF */
+	CLCnSEL2 = 2; /* CLCIN2PPS = BATT1_ON */
+	CLCnSEL3 = 4; /* CLCIN4PPS = PWM_MID */
+
+	CLCnGLS0 = 0x69; /* b01101001 (!PWM_MID|BATT1_ON|PWM_OFF|!PWM_OK) */
+	CLCnGLS1 = 0;
+	CLCnGLS2 = 0;
+	CLCnGLS3 = 0;
+	CLCnCONbits.EN = 1;
+	RB5PPS = 0x04; /* BATT2_ON = CLC4OUT */
+#endif
+
 	oled_col = 20;
 	oled_line = 5;
 	sprintf(oled_displaybuf, "hello");
@@ -1778,6 +1876,10 @@ again:
 	oled_line = 6;
 	displaybuf_icon(ICON_ENGINE);
 	oled_i2c_flush();
+
+	PWM_OFF = 0;
+	PWM_MID = 1;
+	PWM_OUT = 0;
 
 	printf("enter loop\n");
 
@@ -1889,28 +1991,34 @@ again:
 
 		switch (btn_state) {
 		case BTN_DOWN_1:
-			oled_col = 40;
+			oled_col = 60;
 			oled_line = 4;
 			sprintf(oled_displaybuf, "  B1 ");
 			displaybuf_small();
-			printf("B1\n");
+			printf("B1 B 0x%x C 0x%x CLC 0x%x\n", LATB, PORTB, TRISB);
 			btn_state = BTN_DOWN_1_P;
+			LATBbits.LATB4 = 1;
+			batt1_en(1);
 			break;
 		case BTN_DOWN_2:
-			oled_col = 40;
+			oled_col = 60;
 			oled_line = 4;
 			sprintf(oled_displaybuf, "  B2 ");
 			displaybuf_small();
-			printf("B2\n");
+			printf("B2 B 0x%x C 0x%x CLC 0x%x\n", PORTB, ODCONB, TRISB);
 			btn_state = BTN_DOWN_2_P;
+			batt2_en(1);
 			break;
 		case BTN_UP:
-			oled_col = 40;
+			oled_col = 60;
 			oled_line = 4;
 			sprintf(oled_displaybuf, "  up ");
 			displaybuf_small();
-			printf("up\n");
+			printf("up B 0x%x C 0x%x CLC 0x%x\n", PORTB, PORTC, CLCDATA);
 			btn_state = BTN_IDLE;
+			LATBbits.LATB4 = 0;
+			batt1_en(0);
+			batt2_en(0);
 			break;
 		default:
 			break;
@@ -2037,7 +2145,9 @@ again:
 				break;
 			}
 			if (oled_i2c_state == OLED_I2C_ERROR) {
-				printf("oled i2c error\n"); // XXX
+				if (!oled_error)
+					printf("oled i2c error\n"); // XXX
+				oled_error = 1;
 				oled_i2c_state = OLED_I2C_IDLE;
 				oled_i2c_buf[oled_i2c_cons].oled_type = OLED_CTRL_FREE;
 			}
