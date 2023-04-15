@@ -100,7 +100,9 @@ static volatile union softintrs {
 	char byte;
 } softintrs;
 
-static uint16_t a2d_acc;
+static uint16_t ad_pwm;
+static uint16_t ad_solar;
+static uint16_t ad_temp;
 
 static uint16_t board_temp;
 
@@ -652,11 +654,11 @@ adctotemp(u_char c)
 {
 	char i;
 	for (i = 1; temps[i].val != 0; i++) {
-		if (a2d_acc > temps[i].val) {
+		if (ad_temp > temps[i].val) {
 			board_temp = temps[i - 1].temp -
 			((temps[i - 1].temp - temps[i].temp)  /
 		         (temps[i - 1].val - temps[i].val)  * 
-			 (temps[i - 1].val - a2d_acc));
+			 (temps[i - 1].val - ad_temp));
 			return;
 		}
 	} 
@@ -1487,7 +1489,7 @@ main(void)
 	ADCTX = 0;
 	ADCON1 = 0; /* no cap */
 	ADCON2 = 0; /* basic mode */
-	ADCON3 = 0x80; /* SOI */
+	ADCON3 = 0x08; /* SOI */
 	ADREF = 2;  /* vref = vref+ (RA3) */
 	ADPCH = 0; /* RA0 */
 	ADACQH = 0;
@@ -1496,7 +1498,7 @@ main(void)
 	ADCTX = 1;
 	ADCON1 = 0; /* no cap */
 	ADCON2 = 0; /* basic mode */
-	ADCON3 = 0x80; /* SOI */
+	ADCON3 = 0x08; /* SOI */
 	ADREF = 2;  /* vref = vref+ (RA3) */
 	ADPCH = 2; /* RA2 */
 	ADACQH = 0;
@@ -1506,25 +1508,40 @@ main(void)
 	ADCTX = 2;
 	ADCON1 = 0; /* no cap */
 	ADCON2 = 0; /* basic mode */
-	ADCON3 = 0x80; /* SOI */
+	ADCON3 = 0x0f; /* SOI, always interrupt */
 	ADREF = 0;  /* vref = VDD */
 	ADPCH = 5; /* RA5 */
 	ADACQH = 0;
 	ADACQL = 20; /* 20Tad Aq */
+
 	/* XXX setup thresholds */
 	/* context 3: buttons */
 	ADCTX = 3;
 	ADCON1 = 0; /* no cap */
 	ADCON2 = 0; /* basic mode */
-	ADCON3 = 0; /* basic mode */
+	ADCON3 = 0x0f; /* SOI, always interrupt */
 	ADREF = 0;  /* vref = VDD */
 	ADPCH = 1; /* RA1 */
 	ADACQH = 0;
 	ADACQL = 20; /* 20Tad Aq */
 
+	ADCSEL1 = 0x80; /* CHEN */
+	ADCSEL2 = 0x80;
+	ADCSEL3 = 0xc0; /* CHEN | SSI */
+	ADCSEL4 = 0x00;
+
+	PIR2bits.ADCH1IF = 0;
+	PIR2bits.ADCH2IF = 0;
+	PIR2bits.ADCH3IF = 0;
+	PIR2bits.ADCH4IF = 0;
+	PIE2bits.ADCH1IE = 0;
+	PIE2bits.ADCH2IE = 0;
+	PIE2bits.ADCH3IE = 0;
+	PIE2bits.ADCH4IE = 0;
+
 	ADCON0bits.ADON = 1;
-	PIR1bits.ADIF = 0;
-	PIE1bits.ADIE = 0;
+
+	ad_pwm = ad_solar = ad_temp = 0xffff;
 
 	printf("display init");
 	oled_i2c_prod = oled_i2c_cons = 0;
@@ -1878,6 +1895,12 @@ again:
 	PWM_MID = 1;
 	PWM_OUT = 0;
 
+	PIR2bits.ADCH3IF = 0;
+	PIE2bits.ADCH3IE = 1;
+	ADCTX = 0;
+	ADCON0bits.CSEN = 1;
+	ADCON0bits.GO = 1;
+
 	printf("enter loop\n");
 
 	while (1) {
@@ -1903,48 +1926,11 @@ again:
 			}
 		}
 
-#ifdef USEADC
-		if (PIR1bits.ADIF) {
-			PIR1bits.ADIF = 0;
-			a2d_acc = ((u_int)ADRESH << 8) | ADRESL;
-			switch (ADPCH) {
-			case 0:
-				/* channel 0: NTC */
-				adctotemp(0);
-				ADCON0bits.ADON = 0;
-				ADPCH = 1;
-				ADCON0bits.ADON = 1;
-				break;
-			case 1:
-				/* channel 1: NTC */
-				adctotemp(1);
-				ADCON0bits.ADON = 0;
-				ADPCH = 4;
-				ADCON0bits.ADON = 1;
-				break;
-			case 4:
-				/* channel 4: NTC */
-				adctotemp(2);
-				ADCON0bits.ADON = 0;
-				ADPCH = 0;
-				/* don't set ADON, will do on next second */
-				break;
-			default:
-				printf("unknown channel 0x%x\n", ADCON0);
-			}
-		}
-#endif
-
+		PIE1bits.C1IE = 0;
 		if (softintrs.bits.int_btn_down) {
 			softintrs.bits.int_btn_down = 0;
 			if (btn_state == BTN_IDLE) {
 				btn_state = BTN_DOWN;
-				/* get btn value */
-				/* XXX context */
-				ADCTX = 3;
-				PIR1bits.ADIF = 0;
-				PIE1bits.ADIE = 1;
-				ADCON0bits.ADON = 1;
 			}
 		}
 		if (softintrs.bits.int_btn_up) {
@@ -1955,7 +1941,7 @@ again:
 				/* this is a up event */
 				btn_state = BTN_UP;
 				break;
-			BTN_DOWN:
+			case BTN_DOWN:
 			case BTN_DOWN_1:
 			case BTN_DOWN_2:
 				/* not ready for an UP event yet, wait */
@@ -1967,26 +1953,60 @@ again:
 				break;
 			}
 		}
+		PIE1bits.C1IE = 1;
+
 		if (softintrs.bits.int_adcc) {
-			if (btn_state == BTN_DOWN) {
-				if (ADRES > 0x600 && ADRES < 0x900) {
-					btn_state = BTN_DOWN_2;
-				} else if (ADRES > 0x400 && ADRES < 0x600) {
-					btn_state = BTN_DOWN_1;
+			switch(ADCTX) {
+			case 3:
+				PIR2bits.ADCH4IF = 0;
+				PIE2bits.ADCH4IE = 0;
+				if (btn_state == BTN_DOWN) {
+					if (ADRES > 0x600 && ADRES < 0x900) {
+						btn_state = BTN_DOWN_2;
+					} else if (ADRES > 0x400 &&
+						   ADRES < 0x600) {
+						btn_state = BTN_DOWN_1;
+					} else {
+						/* transient event */
+						btn_state = BTN_IDLE;
+					}
 				} else {
-					/* transient event */
 					btn_state = BTN_IDLE;
 				}
-			} else {
-				btn_state = BTN_IDLE;
+				break;
+			default:
+				PIR2bits.ADCH3IF = 0;
+				ADCON0bits.CSEN = 0;
+				/* save channel values */
+				ADCTX = 0;
+				ad_pwm = ADRES;
+				ADCTX = 1;
+				ad_solar = ADRES;
+				ADCTX = 2;
+				ad_temp = ADRES;
+				break;
 			}
-			// printf("ADC complete 0x%x\n", ADRES);
 			softintrs.bits.int_adcc = 0;
-			PIR1bits.ADIF = 0;
-			PIE1bits.ADIE = 0;
+			if (btn_state != BTN_DOWN) {
+				PIR2bits.ADCH3IF = 0;
+				PIE2bits.ADCH3IE = 1;
+				ADCTX = 0;
+				ADCON0bits.CSEN = 1;
+				ADCON0bits.GO = 1;
+			}
 		}
 
 		switch (btn_state) {
+		case BTN_DOWN:
+			/* get btn value */
+			if (!ADCON0bits.GO) {
+				ADCON0bits.CSEN = 0;
+				ADCTX = 3;
+				PIR2bits.ADCH4IF = 0;
+				PIE2bits.ADCH4IE = 1;
+				ADCON0bits.GO = 1;
+			}
+			break;
 		case BTN_DOWN_1:
 			oled_col = 60;
 			oled_line = 4;
@@ -2018,6 +2038,21 @@ again:
 		if (softintrs.bits.int_10hz) {
 			softintrs.bits.int_10hz = 0;
 			counter_1hz--;
+			if (counter_1hz == 3) {
+				adctotemp(0);
+				oled_col = 60;
+				oled_line = 1;
+				sprintf(oled_displaybuf, "%4x", ad_pwm);
+				displaybuf_small();
+				oled_col = 60;
+				oled_line = 2;
+				sprintf(oled_displaybuf, "%4x", ad_solar);
+				displaybuf_small();
+				oled_col = 60;
+				oled_line = 3;
+				sprintf(oled_displaybuf, "%2.2fx", (float)board_temp / 100.0 - 273.15);
+				displaybuf_small();
+			}
 			if (counter_1hz == 2) {
 				double amps;
 				/* update display every seconds */
@@ -2052,8 +2087,6 @@ again:
 				}
 				// USEADC  ADCON0bits.ADON = 1; /* start a new cycle */
 			}
-			if (ADCON0bits.ADON)
-				ADCON0bits.GO = 1;
 			if (!NCANOK && nmea2000_status == NMEA2000_S_OK) {
 				uint16_t ticks, tmrv;
 
@@ -2229,10 +2262,17 @@ irqh_cm1(void)
 	PIR1bits.C1IF = 0;
 }
 
-void __interrupt(__irq(AD), __low_priority, base(IVECT_BASE))
-irqh_adcc(void)
+void __interrupt(__irq(ADCH3), __low_priority, base(IVECT_BASE))
+irqh_adcc3(void)
 {
-	PIE1bits.ADIE = 0;
+	PIE2bits.ADCH3IE = 0;
+	softintrs.bits.int_adcc = 1;
+}
+
+void __interrupt(__irq(ADCH4), __low_priority, base(IVECT_BASE))
+irqh_adcc4(void)
+{
+	PIE2bits.ADCH4IE = 0;
 	softintrs.bits.int_adcc = 1;
 }
 
