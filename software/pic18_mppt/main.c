@@ -1761,12 +1761,10 @@ again:
 	TRISCbits.TRISC0 = 1; /* PWM_OK input */
 
 
-	LATBbits.LATB4 = 1; /* BATT1_ON */
-	LATBbits.LATB5 = 1; /* BATT2_ON */
+	LATBbits.LATB4 = 0; /* BATT1_ON */
+	LATBbits.LATB5 = 0; /* BATT2_ON */
 	TRISBbits.TRISB4 = 0;
 	TRISBbits.TRISB5 = 0;
-
-#if 0
 
 	/*
 	 * set up CLC for BATT1/BATT2 outputs:
@@ -1816,7 +1814,6 @@ again:
 	CLCnGLS3 = 0;
 	CLCnCONbits.EN = 1;
 	RB5PPS = 0x04; /* BATT2_ON = CLC4OUT */
-#endif
 
 	oled_col = 20;
 	oled_line = 5;
@@ -1995,30 +1992,24 @@ again:
 			oled_line = 4;
 			sprintf(oled_displaybuf, "  B1 ");
 			displaybuf_small();
-			printf("B1 B 0x%x C 0x%x CLC 0x%x\n", LATB, PORTB, TRISB);
+			printf("B1\n");
 			btn_state = BTN_DOWN_1_P;
-			LATBbits.LATB4 = 1;
-			batt1_en(1);
 			break;
 		case BTN_DOWN_2:
 			oled_col = 60;
 			oled_line = 4;
 			sprintf(oled_displaybuf, "  B2 ");
 			displaybuf_small();
-			printf("B2 B 0x%x C 0x%x CLC 0x%x\n", PORTB, ODCONB, TRISB);
+			printf("B2\n");
 			btn_state = BTN_DOWN_2_P;
-			batt2_en(1);
 			break;
 		case BTN_UP:
 			oled_col = 60;
 			oled_line = 4;
 			sprintf(oled_displaybuf, "  up ");
 			displaybuf_small();
-			printf("up B 0x%x C 0x%x CLC 0x%x\n", PORTB, PORTC, CLCDATA);
+			printf("up\n");
 			btn_state = BTN_IDLE;
-			LATBbits.LATB4 = 0;
-			batt1_en(0);
-			batt2_en(0);
 			break;
 		default:
 			break;
