@@ -1832,6 +1832,15 @@ again:
 	CLCnCONbits.EN = 1;
 	RB5PPS = 0x04; /* BATT2_ON = CLC4OUT */
 
+	/* setup CM1 for PWM output voltage alarm */
+	CM1CON0 = 0x02; /* hysteresis */
+	CM1CON1 = 0x02; /* interrupt rising edge */
+	CM1NCH = 0x00; /* CH1IN0- = RA0 */
+	CM1PCH = 0x01; /* CH1IN1+ = vref */
+	// CM1CON0bits.EN = 1;
+	PIR1bits.C1IF = 0; /* clear any pending interrupt */
+	PIE1bits.C1IE = 1; /* enable */
+
 	oled_col = 20;
 	oled_line = 5;
 	sprintf(oled_displaybuf, "hello");
@@ -1849,13 +1858,14 @@ again:
 
 	FVRCON = 0x8c; /* FVR on, CDAFVR 4.096v */
 
-	CM1CON0 = 0x42; /* invert polarity, hysteresis */
-	CM1CON1 = 0x03; /* interrupt on both edges */
-	CM1NCH = 0x01; /* CH1IN1- */
-	CM1PCH = 0x06; /* FVR */
-	CM1CON0bits.EN = 1;
-	PIR1bits.C1IF = 0; /* clear any pending interrupt */
-	PIE1bits.C1IE = 1; /* enable */
+	/* CM2 for button interrupt */
+	CM2CON0 = 0x42; /* invert polarity, hysteresis */
+	CM2CON1 = 0x03; /* interrupt on both edges */
+	CM2NCH = 0x01; /* CH1IN1- */
+	CM2PCH = 0x06; /* FVR */
+	CM2CON0bits.EN = 1;
+	PIR14bits.C2IF = 0; /* clear any pending interrupt */
+	PIE14bits.C2IE = 1; /* enable */
 
 	/* wait 1s, clear display and start operations */
 	for (c = 0; c < 100; c++) {
@@ -1926,7 +1936,7 @@ again:
 			}
 		}
 
-		PIE1bits.C1IE = 0;
+		PIE14bits.C2IE = 0;
 		if (softintrs.bits.int_btn_down) {
 			softintrs.bits.int_btn_down = 0;
 			if (btn_state == BTN_IDLE) {
@@ -1953,7 +1963,7 @@ again:
 				break;
 			}
 		}
-		PIE1bits.C1IE = 1;
+		PIE14bits.C2IE = 1;
 
 		if (softintrs.bits.int_adcc) {
 			switch(ADCTX) {
@@ -2255,11 +2265,17 @@ irqh_tu16a(void)
 void __interrupt(__irq(CM1), __low_priority, base(IVECT_BASE))
 irqh_cm1(void)
 {
-	if (CM1CON0bits.OUT)
+	PIR1bits.C1IF = 0;
+}
+
+void __interrupt(__irq(CM2), __low_priority, base(IVECT_BASE))
+irqh_cm2(void)
+{
+	if (CM2CON0bits.OUT)
 		softintrs.bits.int_btn_down = 1;
 	else 
 		softintrs.bits.int_btn_up = 1;
-	PIR1bits.C1IF = 0;
+	PIR14bits.C2IF = 0;
 }
 
 void __interrupt(__irq(ADCH3), __low_priority, base(IVECT_BASE))
