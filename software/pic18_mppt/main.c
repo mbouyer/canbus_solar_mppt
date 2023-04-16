@@ -58,8 +58,10 @@ static u_char nmea2000_data[NMEA2000_DATA_FASTLENGTH];
 
 u_int timer0_read(void);
 
-#define TIMER0_5MS 48
-#define TIMER0_1MS 10
+#define TIMER0_1MS    10
+#define TIMER0_5MS    49
+#define TIMER0_20MS   195
+#define TIMER0_100MS  977
 
 #define NCANOK  PORTCbits.RC2
 
@@ -96,6 +98,7 @@ static volatile union softintrs {
 		char int_adcc : 1;	/* A/D convertion complete */
 		char int_pacavg : 1;	/* pac average values updated */
 		char int_pacacc : 1;	/* pac accum values updated */
+		char int_nosleep : 1;	/* pac accum values updated */
 	} bits;
 	char byte;
 } softintrs;
@@ -116,6 +119,130 @@ static enum {
 	BTN_UP
 } btn_state;
 
+/*
+ * PWM fsm:
+ * DOWN: everything off (PWM_OFF = 1, PWM_MID = PWM_OUT = 0), wait for power
+	 up order
+ * TURNON: PWM_OFF = 1, PWM_MID = PWM_OUT = 0
+ * ON: PWM_OFF = 0, waiting for PWM_OK
+ * OK: PWM_OK asserted, turn on PWM_MID, set up PWM registers and 
+ *     connect PWM_OUT to PWM
+ * IDLE: hardware ready, waiting for PWM values
+ * RUNNING: providing PWM signal
+ * GOIDLE: prepare for off: PWM_OUT = 0
+ * BATTOFF: prepare for off: BATT1_OFF, bATT2_OFF
+ * DISCHARGE: prepare for off: PWM_OUT = 0, PWM_MID = 0,
+ */
+static enum {
+	PWMF_DOWN = 0,
+	PWMF_TURNON,
+	PWMF_ON,
+	PWMF_OK,
+	PWMF_IDLE,
+	PWMF_RUNNING,
+	PWMF_GOIDLE,
+	PWMF_BATTOFF,
+	PWMF_DISCHARGE,
+} pwm_fsm;
+
+static volatile union pwm_events {
+	struct pwm_evtbits {
+		char goon : 1;	/* turn PWM on */
+		char gooff : 1; /* turn PWM off */
+	} bits;
+	char byte;
+} pwm_events;
+
+uint16_t pwm_time;
+
+static inline void
+pwm_runfsm()
+{
+	switch(pwm_fsm) {
+	case PWMF_DOWN:
+		PWM_OFF = 1;
+		PWM_MID = 0;
+		PWM_OUT = 0;
+		if (pwm_events.bits.goon) {
+			pwm_events.bits.goon = 0;
+			pwm_time = timer0_read();
+			pwm_fsm = PWMF_TURNON;
+			softintrs.bits.int_nosleep = 1;
+		}
+		break;
+	case PWMF_TURNON:
+		if ((timer0_read() - pwm_time) > TIMER0_5MS) {
+			PWM_OFF = 0;
+			pwm_time = timer0_read();
+			pwm_fsm = PWMF_ON;
+		}
+		softintrs.bits.int_nosleep = 1;
+		break;
+	case PWMF_ON:
+		if (PWM_OK) {
+			pwm_fsm = PWMF_OK;
+			softintrs.bits.int_nosleep = 1;
+		}
+		if ((timer0_read() - pwm_time) > TIMER0_100MS) {
+			/* timeout, retry */
+			PWM_OFF = 1;
+			pwm_time = timer0_read();
+			pwm_fsm = PWMF_TURNON;
+			softintrs.bits.int_nosleep = 1;
+		}
+		break;
+	case PWMF_OK:
+		PWM_MID = 1;
+		PWM1PR = 512; /* pwm at 125Khz */
+		PWM1S1P1 = 0; /* default to off */
+		PWM1CONbits.EN = 1;
+		PWM1CONbits.LD = 1;
+		pwm_fsm = PWMF_IDLE;
+		softintrs.bits.int_nosleep = 1;
+		break;
+	case PWMF_IDLE:
+		if (pwm_events.bits.gooff) {
+			pwm_events.bits.gooff = 0;
+			PWM1CONbits.EN = 0;
+			pwm_time = timer0_read();
+			pwm_fsm = PWMF_GOIDLE;
+			softintrs.bits.int_nosleep = 1;
+		}
+		break;
+	case PWMF_RUNNING:
+		if (pwm_events.bits.gooff) {
+			pwm_events.bits.gooff = 0;
+			PWM1CONbits.EN = 0;
+			pwm_time = timer0_read();
+			pwm_fsm = PWMF_GOIDLE;
+			softintrs.bits.int_nosleep = 1;
+		}
+		break;
+	case PWMF_GOIDLE:
+		if ((timer0_read() - pwm_time) > TIMER0_20MS) {
+			batt1_en(0);
+			batt2_en(0);
+			pwm_time = timer0_read();
+			pwm_fsm = PWMF_BATTOFF;
+		}
+		softintrs.bits.int_nosleep = 1;
+		break;
+	case PWMF_BATTOFF:
+		if ((timer0_read() - pwm_time) > TIMER0_5MS) {
+			PWM_MID = 0;
+			pwm_time = timer0_read();
+			pwm_fsm = PWMF_DISCHARGE;
+		}
+		softintrs.bits.int_nosleep = 1;
+		break;
+	case PWMF_DISCHARGE:
+		if ((timer0_read() - pwm_time) > TIMER0_20MS) {
+			PWM_OFF = 1;
+			pwm_fsm = PWMF_DOWN;
+		}
+		break;
+	}
+}
 
 #define PAC_I2C_ADDR 0x2e
 
@@ -1435,7 +1562,7 @@ main(void)
 
 	USART_INIT(0);
 
-	/* configure timer0 as free-running counter at 9.765625Khz * 4 */
+	/* configure timer0 as free-running counter at 9.765625Khz */
 	T0CON0 = 0x0;
 	T0CON0bits.MD16 = 1; /* 16 bits */
 	T0CON1 = 0x48; /* 01001000 Fosc/4, sync, 1/256 prescale */
@@ -1841,6 +1968,20 @@ again:
 	PIR1bits.C1IF = 0; /* clear any pending interrupt */
 	PIE1bits.C1IE = 1; /* enable */
 
+	/* setup PWM */
+	OSCFRQ = 0x08; /* HFINTOSC at 64Mhz */
+	PWM1ERS = 0; /* no external reset */
+	PWM1LDS = 0; /* no autoload */
+	PWM1CLK = 0x03; /* use HFINTOSSC: minimum off time = 32 */
+	PWM1CPRE = 0; /* no prescale */
+	PWM1PR = 512; /* pwm at 125Khz */
+	PWM1GIE = 0;
+	PWM1CON = 0; /* no enable yet */
+	PWM1S1CFG = 0; /* left-aligned mode */
+	PWM1S1P1 = 0; /* default to off */
+	PWM1S1P2 = 0;
+	RC6PPS = 0x18; /* PWM1S1P1_OUT */
+
 	oled_col = 20;
 	oled_line = 5;
 	sprintf(oled_displaybuf, "hello");
@@ -1900,10 +2041,6 @@ again:
 	oled_line = 6;
 	displaybuf_icon(ICON_ENGINE);
 	oled_i2c_flush();
-
-	PWM_OFF = 0;
-	PWM_MID = 1;
-	PWM_OUT = 0;
 
 	PIR2bits.ADCH3IF = 0;
 	PIE2bits.ADCH3IE = 1;
@@ -2211,6 +2348,7 @@ again:
 			break;
 		if (softintrs.byte == 0)
 			SLEEP();
+		softintrs.bits.int_nosleep = 0;
 		if (default_src != 0) {
 			printf("default handler called for 0x%x\n",
 			    default_src);
