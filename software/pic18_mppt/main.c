@@ -98,7 +98,6 @@ static volatile union softintrs {
 		char int_adcc : 1;	/* A/D convertion complete */
 		char int_pacavg : 1;	/* pac average values updated */
 		char int_pacacc : 1;	/* pac accum values updated */
-		char int_nosleep : 1;	/* pac accum values updated */
 	} bits;
 	char byte;
 } softintrs;
@@ -167,7 +166,6 @@ pwm_runfsm()
 			pwm_events.bits.goon = 0;
 			pwm_time = timer0_read();
 			pwm_fsm = PWMF_TURNON;
-			softintrs.bits.int_nosleep = 1;
 		}
 		break;
 	case PWMF_TURNON:
@@ -176,19 +174,16 @@ pwm_runfsm()
 			pwm_time = timer0_read();
 			pwm_fsm = PWMF_ON;
 		}
-		softintrs.bits.int_nosleep = 1;
 		break;
 	case PWMF_ON:
 		if (PWM_OK) {
 			pwm_fsm = PWMF_OK;
-			softintrs.bits.int_nosleep = 1;
 		}
 		if ((timer0_read() - pwm_time) > TIMER0_100MS) {
 			/* timeout, retry */
 			PWM_OFF = 1;
 			pwm_time = timer0_read();
 			pwm_fsm = PWMF_TURNON;
-			softintrs.bits.int_nosleep = 1;
 		}
 		break;
 	case PWMF_OK:
@@ -198,7 +193,6 @@ pwm_runfsm()
 		PWM1CONbits.EN = 1;
 		PWM1CONbits.LD = 1;
 		pwm_fsm = PWMF_IDLE;
-		softintrs.bits.int_nosleep = 1;
 		break;
 	case PWMF_IDLE:
 		if (pwm_events.bits.gooff) {
@@ -206,7 +200,6 @@ pwm_runfsm()
 			PWM1CONbits.EN = 0;
 			pwm_time = timer0_read();
 			pwm_fsm = PWMF_GOIDLE;
-			softintrs.bits.int_nosleep = 1;
 		}
 		break;
 	case PWMF_RUNNING:
@@ -215,7 +208,6 @@ pwm_runfsm()
 			PWM1CONbits.EN = 0;
 			pwm_time = timer0_read();
 			pwm_fsm = PWMF_GOIDLE;
-			softintrs.bits.int_nosleep = 1;
 		}
 		break;
 	case PWMF_GOIDLE:
@@ -225,7 +217,6 @@ pwm_runfsm()
 			pwm_time = timer0_read();
 			pwm_fsm = PWMF_BATTOFF;
 		}
-		softintrs.bits.int_nosleep = 1;
 		break;
 	case PWMF_BATTOFF:
 		if ((timer0_read() - pwm_time) > TIMER0_5MS) {
@@ -233,7 +224,6 @@ pwm_runfsm()
 			pwm_time = timer0_read();
 			pwm_fsm = PWMF_DISCHARGE;
 		}
-		softintrs.bits.int_nosleep = 1;
 		break;
 	case PWMF_DISCHARGE:
 		if ((timer0_read() - pwm_time) > TIMER0_20MS) {
@@ -2346,9 +2336,6 @@ again:
 
 		if (PIR4bits.U1RXIF && (U1RXB == 'r'))
 			break;
-		if (softintrs.byte == 0)
-			SLEEP();
-		softintrs.bits.int_nosleep = 0;
 		if (default_src != 0) {
 			printf("default handler called for 0x%x\n",
 			    default_src);
