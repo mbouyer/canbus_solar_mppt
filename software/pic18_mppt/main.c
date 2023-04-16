@@ -191,7 +191,6 @@ pwm_runfsm()
 		PWM1PR = 512; /* pwm at 125Khz */
 		PWM1S1P1 = 0; /* default to off */
 		PWM1CONbits.EN = 1;
-		PWM1CONbits.LD = 1;
 		pwm_fsm = PWMF_IDLE;
 		break;
 	case PWMF_IDLE:
@@ -1475,7 +1474,7 @@ main(void)
 #endif
 	PMD3 = 0xd9; /* keep ADC, CM1, CM2 */
 	PMD4 = 0xff;
-	PMD5 = 0xff;
+	PMD5 = 0xef; /* keep PWM1 */
 	PMD6 = 0xf6; /* keep UART1 and I2C */
 	PMD7 = 0xf3; /* keep CLC3 and CLC4 */
 	PMD8 = 0xfe; /* keep DMA1 */
@@ -1972,6 +1971,9 @@ again:
 	PWM1S1P2 = 0;
 	RC6PPS = 0x18; /* PWM1S1P1_OUT */
 
+	pwm_fsm = PWMF_DOWN;
+	pwm_events.byte = 0;
+
 	oled_col = 20;
 	oled_line = 5;
 	sprintf(oled_displaybuf, "hello");
@@ -2063,6 +2065,21 @@ again:
 			}
 		}
 
+		pwm_runfsm();
+		if (pwm_fsm == PWMF_IDLE) {
+			PWM1PR = 512;
+			PWM1S1P1 = 100;
+			PWM1CONbits.LD = 1;
+			pwm_fsm = PWMF_RUNNING;
+			printf("PWM RUN CON 0x%x PR 0x%x P1 0x%x B 0x%x C 0x%x\n", 
+			    PWM1CON,
+			    PWM1PR,
+			    PWM1S1P1,
+			    PORTB,
+			    PORTC);
+			batt2_en(1);
+		}
+
 		PIE14bits.C2IE = 0;
 		if (softintrs.bits.int_btn_down) {
 			softintrs.bits.int_btn_down = 0;
@@ -2150,6 +2167,7 @@ again:
 			sprintf(oled_displaybuf, "  B1 ");
 			displaybuf_small();
 			printf("B1\n");
+			pwm_events.bits.goon = 1;
 			btn_state = BTN_DOWN_1_P;
 			break;
 		case BTN_DOWN_2:
@@ -2167,6 +2185,7 @@ again:
 			displaybuf_small();
 			printf("up\n");
 			btn_state = BTN_IDLE;
+			pwm_events.bits.gooff = 1;
 			break;
 		default:
 			break;
@@ -2188,6 +2207,10 @@ again:
 				oled_col = 60;
 				oled_line = 3;
 				sprintf(oled_displaybuf, "%2.2fx", (float)board_temp / 100.0 - 273.15);
+				displaybuf_small();
+				oled_col = 60;
+				oled_line = 5;
+				sprintf(oled_displaybuf, "%4x", pwm_fsm);
 				displaybuf_small();
 			}
 			if (counter_1hz == 2) {
