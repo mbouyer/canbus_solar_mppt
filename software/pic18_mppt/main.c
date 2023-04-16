@@ -152,7 +152,28 @@ static volatile union pwm_events {
 	char byte;
 } pwm_events;
 
+static enum {
+	PWME_NOERROR = 0,
+	PWME_PWMV,
+	PWME_PWMOK,
+} pwm_error;
+
 uint16_t pwm_time;
+
+static inline void
+pwmf_goidle()
+{
+	pwm_events.bits.gooff = 0;
+	PWM1CONbits.EN = 0;
+	CM1CON0bits.EN = 0;
+	PIR1bits.C1IF = 0;
+	PIE1bits.C1IE = 0;
+	PIR0bits.IOCIF = 0;
+	IOCCFbits.IOCCF0 = 0;
+	PIE0bits.IOCIE = 0;
+	pwm_time = timer0_read();
+	pwm_fsm = PWMF_GOIDLE;
+}
 
 static inline void
 pwm_runfsm()
@@ -162,14 +183,17 @@ pwm_runfsm()
 		PWM_OFF = 1;
 		PWM_MID = 0;
 		PWM_OUT = 0;
+		if (pwm_error != PWME_NOERROR)
+			return;
 		if (pwm_events.bits.goon) {
 			pwm_events.bits.goon = 0;
 			pwm_time = timer0_read();
 			pwm_fsm = PWMF_TURNON;
+			CM1CON0bits.EN = 1; /* need to turn on early */
 		}
 		break;
 	case PWMF_TURNON:
-		if ((timer0_read() - pwm_time) > TIMER0_5MS) {
+		if ((timer0_read() - pwm_time) > TIMER0_100MS) {
 			PWM_OFF = 0;
 			pwm_time = timer0_read();
 			pwm_fsm = PWMF_ON;
@@ -181,6 +205,7 @@ pwm_runfsm()
 		}
 		if ((timer0_read() - pwm_time) > TIMER0_100MS) {
 			/* timeout, retry */
+			printf("PWM_OK tout\n");
 			PWM_OFF = 1;
 			pwm_time = timer0_read();
 			pwm_fsm = PWMF_TURNON;
@@ -191,22 +216,21 @@ pwm_runfsm()
 		PWM1PR = 512; /* pwm at 125Khz */
 		PWM1S1P1 = 0; /* default to off */
 		PWM1CONbits.EN = 1;
+		PIR1bits.C1IF = 0;
+		PIE1bits.C1IE = 1;
+		PIR0bits.IOCIF = 0;
+		IOCCFbits.IOCCF0 = 0;
+		PIE0bits.IOCIE = 1;
 		pwm_fsm = PWMF_IDLE;
 		break;
 	case PWMF_IDLE:
 		if (pwm_events.bits.gooff) {
-			pwm_events.bits.gooff = 0;
-			PWM1CONbits.EN = 0;
-			pwm_time = timer0_read();
-			pwm_fsm = PWMF_GOIDLE;
+			pwmf_goidle();
 		}
 		break;
 	case PWMF_RUNNING:
 		if (pwm_events.bits.gooff) {
-			pwm_events.bits.gooff = 0;
-			PWM1CONbits.EN = 0;
-			pwm_time = timer0_read();
-			pwm_fsm = PWMF_GOIDLE;
+			pwmf_goidle();
 		}
 		break;
 	case PWMF_GOIDLE:
@@ -1476,7 +1500,7 @@ main(void)
 	PMD4 = 0xff;
 	PMD5 = 0xef; /* keep PWM1 */
 	PMD6 = 0xf6; /* keep UART1 and I2C */
-	PMD7 = 0xf3; /* keep CLC3 and CLC4 */
+	PMD7 = 0xf2; /* keep CLC1, CLC3 and CLC4 */
 	PMD8 = 0xfe; /* keep DMA1 */
 
 	ANSELC = 0;
@@ -1950,16 +1974,37 @@ again:
 
 	/* setup CM1 for PWM output voltage alarm */
 	CM1CON0 = 0x02; /* hysteresis */
-	CM1CON1 = 0x02; /* interrupt rising edge */
+	CM1CON1 = 0x01; /* interrupt falling edge */
 	CM1NCH = 0x00; /* CH1IN0- = RA0 */
 	CM1PCH = 0x01; /* CH1IN1+ = vref */
-	// CM1CON0bits.EN = 1;
+	CM1CON0bits.EN = 0; /* enable when PWM is running */
 	PIR1bits.C1IF = 0; /* clear any pending interrupt */
-	PIE1bits.C1IE = 1; /* enable */
+	PIE1bits.C1IE = 0; /* enable when PWM is running */
+
+	/* setup IOC to monitor PWM_OK (RC0) going low */
+	IOCAP = IOCBP = IOCCP = IOCEP = 0;
+	IOCAN = IOCBN = IOCEN = 0;
+	IOCCN = 1;
+	PIE0bits.IOCIE = 0; /* enable when PWM is running */
+
+	/* setup CLC1 for PWM reset: (!PWM_OK | !CM1OUT) */
+	CLCSELECT = 0;
+	CLCnCON = 0x02; /* 4 input and */
+	CLCnPOL = 0x0e; /* 1 noninverted; 2, 3 & 4 inverted */
+	CLCnSEL0 = 0; /* CLCIN0PPS = PWM_OK */
+	CLCnSEL1 = 45; /* CM1OUT */
+	CLCnSEL2 = 0; /* CLCIN0PPS = PWM_OK */
+	CLCnSEL3 = 0; /* CLCIN0PPS = PWM_OK */
+
+	CLCnGLS0 = 0x05; /* b00000101 (!PWM_OK| !CM1OUT) */
+	CLCnGLS1 = 0;
+	CLCnGLS2 = 0;
+	CLCnGLS3 = 0;
+	CLCnCONbits.EN = 1;
 
 	/* setup PWM */
 	OSCFRQ = 0x08; /* HFINTOSC at 64Mhz */
-	PWM1ERS = 0; /* no external reset */
+	PWM1ERS = 0x0a; /* CLC1_OUT */
 	PWM1LDS = 0; /* no autoload */
 	PWM1CLK = 0x03; /* use HFINTOSSC: minimum off time = 32 */
 	PWM1CPRE = 0; /* no prescale */
@@ -1973,6 +2018,7 @@ again:
 
 	pwm_fsm = PWMF_DOWN;
 	pwm_events.byte = 0;
+	pwm_error = PWME_NOERROR;
 
 	oled_col = 20;
 	oled_line = 5;
@@ -2167,6 +2213,7 @@ again:
 			sprintf(oled_displaybuf, "  B1 ");
 			displaybuf_small();
 			printf("B1\n");
+			pwm_events.bits.gooff = 0;
 			pwm_events.bits.goon = 1;
 			btn_state = BTN_DOWN_1_P;
 			break;
@@ -2176,6 +2223,11 @@ again:
 			sprintf(oled_displaybuf, "  B2 ");
 			displaybuf_small();
 			printf("B2\n");
+			if (pwm_error != PWME_NOERROR) {
+				printf("clear PWM error %d\n", pwm_error);
+				pwm_error = PWME_NOERROR;
+			}
+			pwm_events.bits.gooff = 1;
 			btn_state = BTN_DOWN_2_P;
 			break;
 		case BTN_UP:
@@ -2185,7 +2237,6 @@ again:
 			displaybuf_small();
 			printf("up\n");
 			btn_state = BTN_IDLE;
-			pwm_events.bits.gooff = 1;
 			break;
 		default:
 			break;
@@ -2208,9 +2259,9 @@ again:
 				oled_line = 3;
 				sprintf(oled_displaybuf, "%2.2fx", (float)board_temp / 100.0 - 273.15);
 				displaybuf_small();
-				oled_col = 60;
+				oled_col = 54;
 				oled_line = 5;
-				sprintf(oled_displaybuf, "%4x", pwm_fsm);
+				sprintf(oled_displaybuf, "%1x %1x %2x%2x %2x", pwm_fsm, pwm_error, PIR0, PIE0, PORTC);
 				displaybuf_small();
 			}
 			if (counter_1hz == 2) {
@@ -2410,10 +2461,23 @@ irqh_tu16a(void)
 }
 #endif
 
+void __interrupt(__irq(IOC), __low_priority, base(IVECT_BASE))
+irqh_ioc(void)
+{
+	PIR0bits.IOCIF = 0;
+	IOCCFbits.IOCCF0 = 0;
+	PIE0bits.IOCIE = 0;
+	pwm_events.bits.gooff = 1;
+	pwm_error = PWME_PWMOK;
+}
+
 void __interrupt(__irq(CM1), __low_priority, base(IVECT_BASE))
 irqh_cm1(void)
 {
 	PIR1bits.C1IF = 0;
+	PIE1bits.C1IE = 0;
+	pwm_events.bits.gooff = 1;
+	pwm_error = PWME_PWMV;
 }
 
 void __interrupt(__irq(CM2), __low_priority, base(IVECT_BASE))
