@@ -160,6 +160,8 @@ static enum {
 
 uint16_t pwm_time;
 
+uint8_t pwm_duty_t, pwm_duty_c; /* duty cycle in % * 2 */
+
 static inline void
 pwmf_goidle()
 {
@@ -255,6 +257,36 @@ pwm_runfsm()
 		}
 		break;
 	}
+}
+
+static void
+pwm_set_duty()
+{
+	uint32_t v;
+
+	/* experiments show we can't go above 98% */
+	if (pwm_duty_c > 198)
+		pwm_duty_c = 198;
+
+	/* first try running at 125Khz */
+	v = (uint32_t)512 * (uint32_t)pwm_duty_c / 200;
+	printf("v 0x%lx ", v);
+	/*
+	 * off time needs to be at last 500ns (the NCP5901B's ZCD blanking
+	 * timer is 250ns
+	 */
+	if (512 - v >= 32) {
+		PWM1PR = 512;
+		PWM1S1P1 = v;
+	} else {
+		/* duty cycle too large, decrease PWM frequency */
+		/* PR = 32 / (1 - pwm_duty_c / 200) */
+		/* PR = 32 * 200 / (200 - pwm_duty_c) */
+		PWM1PR = 6400 / (200 - pwm_duty_c);
+		PWM1S1P1 = PWM1PR - 32;
+	}
+	printf("PWM1PR 0x%x S1P1 0x%x\n", PWM1PR, PWM1S1P1);
+	PWM1CONbits.LD = 1;
 }
 
 #define PAC_I2C_ADDR 0x2e
@@ -2113,9 +2145,9 @@ again:
 
 		pwm_runfsm();
 		if (pwm_fsm == PWMF_IDLE) {
-			PWM1PR = 512;
-			PWM1S1P1 = 100;
-			PWM1CONbits.LD = 1;
+			batt2_en(1);
+			pwm_duty_c = 20; /* start at 10% */
+			pwm_set_duty();
 			pwm_fsm = PWMF_RUNNING;
 			printf("PWM RUN CON 0x%x PR 0x%x P1 0x%x B 0x%x C 0x%x\n", 
 			    PWM1CON,
@@ -2123,7 +2155,6 @@ again:
 			    PWM1S1P1,
 			    PORTB,
 			    PORTC);
-			batt2_en(1);
 		}
 
 		PIE14bits.C2IE = 0;
@@ -2213,6 +2244,7 @@ again:
 			sprintf(oled_displaybuf, "  B1 ");
 			displaybuf_small();
 			printf("B1\n");
+			pwm_duty_t = 198;
 			pwm_events.bits.gooff = 0;
 			pwm_events.bits.goon = 1;
 			btn_state = BTN_DOWN_1_P;
@@ -2244,6 +2276,15 @@ again:
 
 		if (softintrs.bits.int_10hz) {
 			softintrs.bits.int_10hz = 0;
+			if (pwm_fsm == PWMF_RUNNING) {
+				if (pwm_duty_c < pwm_duty_t) {
+					pwm_duty_c++;
+					pwm_set_duty();
+				} else if (pwm_duty_c > pwm_duty_t) {
+					pwm_duty_c--;
+					pwm_set_duty();
+				}
+			}
 			counter_1hz--;
 			if (counter_1hz == 3) {
 				adctotemp(0);
