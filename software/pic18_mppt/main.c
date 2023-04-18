@@ -2385,7 +2385,13 @@ again:
 				/* i = acc_value * 0.00075 */
 				/* batt_i = acc_value * 0.00075 * 100 */
 				v = (double)_read_voltcur.batt_i[c] * 0.075;
-				batt_i[2 - c] = (int16_t)(v + 0.5);
+				if (c != 0) {
+					/* batt1/batt2 are inverted */
+					batt_i[2 - c] = (int16_t)(-v + 0.5);
+				} else {
+					batt_i[2] = (int16_t)(v + 0.5);
+				}
+
 				// printf(" %4.4fA", v / 100);
 				/* volt = vbus * 0.000488 */
 				/* batt_v = vbus * 0.000488 * 100 */      
