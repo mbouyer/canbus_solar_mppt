@@ -97,8 +97,6 @@ static volatile union softintrs {
 		char int_btn_down : 1;	/* button release->press */
 		char int_btn_up : 1;	/* button press->release */
 		char int_adcc : 1;	/* A/D convertion complete */
-		char int_pacavg : 1;	/* pac average values updated */
-		char int_pacacc : 1;	/* pac accum values updated */
 	} bits;
 	char byte;
 } softintrs;
@@ -108,6 +106,34 @@ static uint16_t ad_solar;
 static uint16_t ad_temp;
 
 static uint16_t board_temp;
+
+static union pacops_pending {
+	struct pacops_bits {
+		char refresh : 1;	/* send a refresh command */
+		char refresh_v : 1;	/* send a refresh_v command */
+		char read_values : 1;	/* read average values */
+		char read_accum : 1;	/* read accumulator values */
+	} bits;
+	char byte;
+} pacops_pending;
+
+u_int pac_refresh_time;
+u_char pac_refresh_valid;
+
+uint16_t batt_v[4];
+int16_t batt_i[4];
+
+static uint32_t voltages_acc[4];
+pac_ctrl_t pac_ctrl;
+
+static union pac_events {
+	struct pacevts_bits {
+		char pacavg_rdy : 1;	/* _read_voltcur updated */
+		char pacacc_rdy : 1;	/* _read_accum updated */
+		char bvalues_updated : 1; /* batt_i[] & batt_v[] updated */
+	} bits;
+	char byte;
+} pac_events;
 
 static enum {
 	BTN_IDLE = 0,
@@ -238,6 +264,12 @@ pwm_runfsm()
 		break;
 	case PWMF_GOIDLE:
 		if ((timer0_read() - pwm_time) > TIMER0_20MS) {
+			printf("PWM OFF CON 0x%x PR 0x%x P1 0x%x B 0x%x C 0x%x\n", 
+			    PWM1CON,
+			    PWM1PR,
+			    PWM1S1P1,
+			    PORTB,
+			    PORTC);
 			batt1_en(0);
 			batt2_en(0);
 			pwm_time = timer0_read();
@@ -264,6 +296,11 @@ static void
 pwm_set_duty()
 {
 	uint32_t v;
+	/*
+	 * off time needs to be at last 500ns (the NCP5901B's ZCD blanking
+	 * timer is 250ns
+	 */
+#define PWM_MIN_OFF 32
 
 	/* experiments show we can't go above 98% */
 	if (pwm_duty_c > 198)
@@ -271,22 +308,18 @@ pwm_set_duty()
 
 	/* first try running at 125Khz */
 	v = (uint32_t)512 * (uint32_t)pwm_duty_c / 200;
-	printf("v 0x%lx ", v);
-	/*
-	 * off time needs to be at last 500ns (the NCP5901B's ZCD blanking
-	 * timer is 250ns
-	 */
-	if (512 - v >= 32) {
+	// printf("v 0x%lx ", v);
+	if (512 - v >= PWM_MIN_OFF) {
 		PWM1PR = 512;
 		PWM1S1P1 = (uint16_t)v;
 	} else {
 		/* duty cycle too large, decrease PWM frequency */
-		/* PR = 32 / (1 - pwm_duty_c / 200) */
-		/* PR = 32 * 200 / (200 - pwm_duty_c) */
-		PWM1PR = 6400 / (200 - pwm_duty_c);
-		PWM1S1P1 = PWM1PR - 32;
+		/* PR = PWM_MIN_OFF / (1 - pwm_duty_c / 200) */
+		/* PR = PWM_MIN_OFF * 200 / (200 - pwm_duty_c) */
+		PWM1PR = (PWM_MIN_OFF * 200) / (200 - pwm_duty_c);
+		PWM1S1P1 = PWM1PR - PWM_MIN_OFF;
 	}
-	printf("PWM1PR 0x%x S1P1 0x%x\n", PWM1PR, PWM1S1P1);
+	// printf("PWM1PR 0x%x S1P1 0x%x\n", PWM1PR, PWM1S1P1);
 	PWM1CONbits.LD = 1;
 }
 
@@ -307,9 +340,14 @@ static volatile union chrg_events {
 	char byte;
 } chrg_events;
 
+static int16_t chrg_previous_current;
+int8_t chrg_duty_change;
+
 static void
 chrg_runfsm()
 {
+	if (pwm_error != 0)
+		chrg_events.bits.gooff = 1;
 	switch(chrg_fsm) {
 	case CHRG_DOWN:
 		if (chrg_events.bits.goon) {
@@ -339,15 +377,52 @@ chrg_runfsm()
 		break;
 
 	case CHRG_RAMPUP:
-		if (chrg_events.bits.gooff)
+		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
-		else if (pwm_duty_t == pwm_duty_c)
-			chrg_fsm = CHRG_MPPT;
+			return;
+		}
+		if (pac_events.bits.bvalues_updated) {
+			pac_events.bits.bvalues_updated = 0;
+			/*
+			 * if we're pushing more than 300mA to the battery
+			 * we can try MPPT
+			 */
+			/* XXX battselect */
+			if (batt_i[1] > 50) {
+				chrg_previous_current = batt_i[1];
+				chrg_duty_change = 1;
+				chrg_fsm = CHRG_MPPT;
+				return;
+			}
+
+			if (pwm_duty_c < pwm_duty_t) {
+				pwm_duty_c++;
+				if (pwm_duty_c > 198)
+					pwm_duty_c = 198;
+				pwm_set_duty();
+			} else if (pwm_duty_c > pwm_duty_t) {
+				pwm_duty_c--;
+				if (pwm_duty_c < 10)
+					pwm_duty_c = 10;
+				pwm_set_duty();
+			}
+		}
 		break;
 			
 	case CHRG_MPPT:
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
+		}
+		if (pac_events.bits.bvalues_updated) {
+			pac_events.bits.bvalues_updated = 0;
+			/* XXX battselect */
+			if (chrg_previous_current > batt_i[1]) {
+				/* wrong move */
+				chrg_duty_change = -chrg_duty_change;
+			}
+			chrg_previous_current = batt_i[1];
+			pwm_duty_c += chrg_duty_change;
+			pwm_set_duty();
 		}
 		break;
 		
@@ -372,12 +447,6 @@ chrg_runfsm()
 #define PAC_I2C_ADDR 0x2e
 
 static volatile i2c_return_t i2c_return;
-
-uint16_t batt_v[4];
-int16_t batt_i[4];
-
-static uint32_t voltages_acc[4];
-pac_ctrl_t pac_ctrl;
 
 /* for journal */
 static int64_t l600_current_acc[4];
@@ -1108,19 +1177,6 @@ putch(char c)
 	}
 }
 
-static union pacops_pending {
-	struct pacops_bits {
-		char refresh : 1;	/* send a refresh command */
-		char refresh_v : 1;	/* send a refresh_v command */
-		char read_values : 1;	/* read average values */
-		char read_accum : 1;	/* read accumulator values */
-	} bits;
-	char byte;
-} pacops_pending;
-
-u_int pac_refresh_time;
-u_char pac_refresh_valid;
-
 static void
 pac_command_complete(void)
 {
@@ -1133,10 +1189,10 @@ pac_command_complete(void)
 		}
 		break;
 	case PAC_READ_AVG:
-		softintrs.bits.int_pacavg = 1;
+		pac_events.bits.pacavg_rdy = 1;
 		break;
 	case PAC_READ_ACCUM:
-		softintrs.bits.int_pacacc = 1;
+		pac_events.bits.pacacc_rdy = 1;
 		break;
 	default:
 		printf("unknown pac_complete %d\n", pac_i2c_io.pac_type);
@@ -1172,11 +1228,11 @@ pac_command_schedule(void)
 		if (pacops_pending.bits.read_values) {
 			pacops_pending.bits.read_values = 0;
 			pac_i2c_io.pac_type = PAC_READ_AVG;
-			softintrs.bits.int_pacavg = 0;
+			pac_events.bits.pacavg_rdy = 0;
 		} else {
 			pacops_pending.bits.read_accum = 0;
 			pac_i2c_io.pac_type = PAC_READ_ACCUM;
-			softintrs.bits.int_pacacc = 0;
+			pac_events.bits.pacacc_rdy = 0;
 		}
 		pac_i2c_state = PAC_I2C_WAIT;
 		return;
@@ -1821,6 +1877,7 @@ main(void)
 
 	PAC_NDOWN = 1;
 	pacops_pending.byte = 0;
+	pac_events.byte = 0;
 	/* wait 50ms for pac1953 to be up */
 	for (c = 0; c < 50; c++) {
 		t0 = timer0_read();
@@ -2287,15 +2344,6 @@ again:
 
 		if (softintrs.bits.int_100hz) {
 			softintrs.bits.int_100hz = 0;
-			if (chrg_fsm == CHRG_RAMPUP) {
-				if (pwm_duty_c < pwm_duty_t) {
-					pwm_duty_c++;
-					pwm_set_duty();
-				} else if (pwm_duty_c > pwm_duty_t) {
-					pwm_duty_c--;
-					pwm_set_duty();
-				}
-			}
 			counter_10hz--;
 			/* read PAC values every 10ms, but also accum every s */
 			if (counter_10hz == 1 && counter_1hz == 1) {
@@ -2373,11 +2421,11 @@ again:
 				}
 			}
 		}
-		if (softintrs.bits.int_pacacc) {
+		if (pac_events.bits.pacacc_rdy) {
 			int64_t acc_value;
 			double v;
 			char *acc_bytes = (void *)&acc_value;
-			softintrs.bits.int_pacacc = 0;
+			pac_events.bits.pacacc_rdy = 0;
 			// printf("acc %ld", _read_accum.acc_count.acccnt_count);
 			l600_current_count += _read_accum.acc_count.acccnt_count;
 			for (c = 0; c < 3; c++) {
@@ -2398,9 +2446,9 @@ again:
 			}
 			// printf("\n");
 		}
-		if (softintrs.bits.int_pacavg) {
+		if (pac_events.bits.pacavg_rdy) {
 			double v;
-			softintrs.bits.int_pacavg = 0;
+			pac_events.bits.pacavg_rdy = 0;
 			// printf("avg");
 			for (c = 0; c < 3; c++) {
 				/* i = acc_value * 0.00075 */
@@ -2421,6 +2469,7 @@ again:
 				// printf(" %4.4fV", v / 100);
 			}
 			// printf("\n");
+			pac_events.bits.bvalues_updated = 1;
 		}
 		pac_command_schedule();
 		while (i2c_return != I2C_INPROGRESS) {
