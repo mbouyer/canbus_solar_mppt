@@ -87,12 +87,13 @@ batt2_en(char on)
 	CLCnPOLbits.G2POL = on;
 }
 
+static char counter_100hz;
 static char counter_10hz;
 static char counter_1hz;
 static uint16_t seconds;
 static volatile union softintrs {
 	struct softintrs_bits {
-		char int_10hz : 1;	/* 0.1s timer */
+		char int_100hz : 1;	/* 0.1s timer */
 		char int_btn_down : 1;	/* button release->press */
 		char int_btn_up : 1;	/* button press->release */
 		char int_adcc : 1;	/* A/D convertion complete */
@@ -1182,67 +1183,6 @@ pac_command_schedule(void)
 	}
 }
 
-#if 0
-static void
-read_pac_channel(void)
-{
-	char c;
-	static pac_acccnt_t pac_acccnt;
-	int64_t acc_value;
-	double v;
-
-	i2c_readreg_be(PAC_I2C_ADDR, PAC_ACCCNT,
-	    (void *)&pac_acccnt, sizeof(pac_acccnt), &i2c_return);
-	if (i2c_wait(&i2c_return) != 0) {
-		printf("read pac_acccnt fail\n");
-		pac_acccnt.acccnt_count = 0;
-		return;
-	} 
-	printf("\n %d count %lu", NCANOK, pac_acccnt.acccnt_count);
-	l600_current_count += pac_acccnt.acccnt_count;
-
-	for (c = 0; c < 4; c++) {
-		if ((pac_ctrl.ctrl_chan_dis & (8 >> c)) != 0)
-			continue;
-
-		acc_value = 0;
-		i2c_readreg_be(PAC_I2C_ADDR, PAC_ACCV1 + c,
-		    (void *)&acc_value, 7, &i2c_return);
-		if (i2c_wait(&i2c_return) != 0) {
-			printf("read acc_value[%d] fail\n", c);
-			continue;
-		}
-		if (acc_value & 0x0080000000000000) {
-			/* adjust negative value */
-			acc_value |= 0xff00000000000000;
-		}
-		l600_current_acc[c] += acc_value;
-		/* batt_i = acc_value * 0.00075 * 100 */
-		v = (double)acc_value * 0.075 / pac_acccnt.acccnt_count;
-		/* adjust with calibration data */
-		switch(c) {
-		case 0:
-			v = v * 0.988689144013892;
-			break;
-		case 1:
-			v = v * 1.00930129713152;
-			break;
-		case 2:
-			v = v * 4.06331342566096;
-			break;
-		}
-		batt_i[c] = (int16_t)(v + 0.5);
-		printf(" %d %4.4fA", c, v / 100);
-		/* volt = vbus * 0.000488 */
-		/* batt_v = voltages_acc * 0.000488 * 100 / 10; */
-		/* adjust by 0.99955132 from calibration data */
-		v = (double)voltages_acc[c] * 0.0048778104;
-		batt_v[c] = (int16_t)(v + 0.5);
-		printf(" %4.3fV", v / 100);
-	}
-}
-#endif
-
 #define OLED_ADDR 0x78 // 0b01111000
 #define OLED_DISPLAY_SIZE 1024 /* 128 * 64 / 8 */
 #define OLED_DISPLAY_W 128
@@ -1654,7 +1594,8 @@ main(void)
 
 
 	softintrs.byte = 0;
-	counter_10hz = 25;
+	counter_100hz = 10;
+	counter_10hz = 10;
 	counter_1hz = 10;
 	seconds = 0;
 
@@ -1704,13 +1645,13 @@ main(void)
 	IPR3bits.TMR2IP = 1; /* high priority interrupt */
 	PIE3bits.TMR2IE = 1;
 #else
-	/* configure UTMR for 10Hz interrupt */
+	/* configure UTMR for 100Hz interrupt */
 	TU16ACON0 = 0x04; /* period match IE */
 	TU16ACON1 = 0x00;
 	TU16AHLT = 0x00; /* can't use hardware reset because of HW bug */
 	TU16APS = 249; /* prescaler = 250 -> 40000 Hz */
-	TU16APRH = (4000 >> 8) & 0xff;
-	TU16APRL = 4000 & 0xff;
+	TU16APRH = (400 >> 8) & 0xff;
+	TU16APRL = 400 & 0xff;
 	TU16ACLK = 0x2; /* Fosc */
 	TUCHAIN = 0;
 	TU16ACON0bits.ON = 1;
@@ -2344,8 +2285,8 @@ again:
 			break;
 		}
 
-		if (softintrs.bits.int_10hz) {
-			softintrs.bits.int_10hz = 0;
+		if (softintrs.bits.int_100hz) {
+			softintrs.bits.int_100hz = 0;
 			if (chrg_fsm == CHRG_RAMPUP) {
 				if (pwm_duty_c < pwm_duty_t) {
 					pwm_duty_c++;
@@ -2355,8 +2296,20 @@ again:
 					pwm_set_duty();
 				}
 			}
+			counter_10hz--;
+			/* read PAC values every 10ms, but also accum every s */
+			if (counter_10hz == 1 && counter_1hz == 1) {
+				pacops_pending.bits.refresh = 1;
+				pacops_pending.bits.read_accum = 1;
+			} else {
+				pacops_pending.bits.refresh_v = 1;
+			}
+			pacops_pending.bits.read_values = 1;
+		}
+		if (counter_10hz == 0) {
+			counter_10hz = 10;
 			counter_1hz--;
-			if (counter_1hz == 3) {
+			if (counter_1hz == 2) {
 				adctotemp(0);
 				oled_col = 60;
 				oled_line = 1;
@@ -2370,14 +2323,15 @@ again:
 				oled_line = 3;
 				sprintf(oled_displaybuf, "%2.2fx", (float)board_temp / 100.0 - 273.15);
 				displaybuf_small();
-				oled_col = 54;
-				oled_line = 5;
-				sprintf(oled_displaybuf, "%1x %1x %1x", pwm_fsm, pwm_error, chrg_fsm);
-				displaybuf_small();
 			}
-			if (counter_1hz == 2) {
+			oled_col = 54;
+			oled_line = 5;
+			sprintf(oled_displaybuf, "%1x %1x %1x %2x", pwm_fsm, pwm_error, chrg_fsm, pwm_duty_c);
+			displaybuf_small();
+		
+			if ((counter_1hz & 1) == 1) {
 				double amps;
-				/* update display every seconds */
+				/* update display 5 times per second */
 				/* solar */
 				oled_col = 20;
 				oled_line = 0;
@@ -2392,12 +2346,6 @@ again:
 				dislplay_battstat(0);
 			}
 
-			if (counter_1hz == 1)
-				pacops_pending.bits.refresh = 1;
-			else if (counter_1hz & 1)
-				pacops_pending.bits.refresh_v = 1;
-			else
-				pacops_pending.bits.read_values = 1;
 
 			if (counter_1hz == 0) {
 				counter_1hz = 10;
@@ -2449,7 +2397,10 @@ again:
 
 			}
 			// printf("\n");
-				
+		}
+		if (softintrs.bits.int_pacavg) {
+			double v;
+			softintrs.bits.int_pacavg = 0;
 			// printf("avg");
 			for (c = 0; c < 3; c++) {
 				/* i = acc_value * 0.00075 */
@@ -2470,9 +2421,6 @@ again:
 				// printf(" %4.4fV", v / 100);
 			}
 			// printf("\n");
-		}
-		if (softintrs.bits.int_pacavg) {
-			softintrs.bits.int_pacavg = 0;
 		}
 		pac_command_schedule();
 		while (i2c_return != I2C_INPROGRESS) {
@@ -2574,7 +2522,7 @@ irqh_tu16a(void)
 {
 	TU16ACON1bits.CLR = 1;
 	TU16ACON1bits.PRIF = 0;
-	softintrs.bits.int_10hz = 1;
+	softintrs.bits.int_100hz = 1;
 }
 #endif
 
