@@ -277,7 +277,7 @@ pwm_set_duty()
 	 */
 	if (512 - v >= 32) {
 		PWM1PR = 512;
-		PWM1S1P1 = v;
+		PWM1S1P1 = (uint16_t)v;
 	} else {
 		/* duty cycle too large, decrease PWM frequency */
 		/* PR = 32 / (1 - pwm_duty_c / 200) */
@@ -287,6 +287,85 @@ pwm_set_duty()
 	}
 	printf("PWM1PR 0x%x S1P1 0x%x\n", PWM1PR, PWM1S1P1);
 	PWM1CONbits.LD = 1;
+}
+
+static enum {
+	CHRG_DOWN = 0,
+	CHRG_PWMUP,
+	CHRG_RAMPUP,
+	CHRG_MPPT,
+	CHRG_CV,
+	CHRG_GODOWN
+} chrg_fsm;
+
+static volatile union chrg_events {
+	struct chrg_evtbits {
+		char goon : 1;	/* turn PWM on */
+		char gooff : 1; /* turn PWM off */
+	} bits;
+	char byte;
+} chrg_events;
+
+static void
+chrg_runfsm()
+{
+	switch(chrg_fsm) {
+	case CHRG_DOWN:
+		if (chrg_events.bits.goon) {
+			chrg_events.bits.goon = 0;
+			pwm_events.bits.gooff = 0;
+			pwm_events.bits.goon = 1;
+			chrg_fsm = CHRG_PWMUP;
+		}
+		break;
+
+	case CHRG_PWMUP:
+		if (chrg_events.bits.gooff) {
+			chrg_fsm = CHRG_GODOWN;
+		} else if (pwm_fsm == PWMF_IDLE) {
+			batt2_en(1);
+			pwm_duty_c = 20; /* start at 10% */
+			pwm_set_duty();
+			pwm_fsm = PWMF_RUNNING;
+			printf("PWM RUN CON 0x%x PR 0x%x P1 0x%x B 0x%x C 0x%x\n", 
+			    PWM1CON,
+			    PWM1PR,
+			    PWM1S1P1,
+			    PORTB,
+			    PORTC);
+			chrg_fsm = CHRG_RAMPUP;
+		}
+		break;
+
+	case CHRG_RAMPUP:
+		if (chrg_events.bits.gooff)
+			chrg_fsm = CHRG_GODOWN;
+		else if (pwm_duty_t == pwm_duty_c)
+			chrg_fsm = CHRG_MPPT;
+		break;
+			
+	case CHRG_MPPT:
+		if (chrg_events.bits.gooff) {
+			chrg_fsm = CHRG_GODOWN;
+		}
+		break;
+		
+	case CHRG_CV:
+		if (chrg_events.bits.gooff) {
+			chrg_fsm = CHRG_GODOWN;
+		}
+		break;
+
+	case CHRG_GODOWN:
+		if (chrg_events.bits.gooff) {
+			chrg_events.bits.gooff = 0;
+			chrg_events.bits.goon = 0;
+			pwm_events.bits.gooff = 1;
+		}
+		if (pwm_fsm == PWMF_DOWN)
+			chrg_fsm = CHRG_DOWN;
+		break;
+	}
 }
 
 #define PAC_I2C_ADDR 0x2e
@@ -2052,6 +2131,9 @@ again:
 	pwm_events.byte = 0;
 	pwm_error = PWME_NOERROR;
 
+	chrg_fsm = CHRG_DOWN;
+	chrg_events.byte = 0;
+
 	oled_col = 20;
 	oled_line = 5;
 	sprintf(oled_displaybuf, "hello");
@@ -2143,19 +2225,8 @@ again:
 			}
 		}
 
+		chrg_runfsm();
 		pwm_runfsm();
-		if (pwm_fsm == PWMF_IDLE) {
-			batt2_en(1);
-			pwm_duty_c = 20; /* start at 10% */
-			pwm_set_duty();
-			pwm_fsm = PWMF_RUNNING;
-			printf("PWM RUN CON 0x%x PR 0x%x P1 0x%x B 0x%x C 0x%x\n", 
-			    PWM1CON,
-			    PWM1PR,
-			    PWM1S1P1,
-			    PORTB,
-			    PORTC);
-		}
 
 		PIE14bits.C2IE = 0;
 		if (softintrs.bits.int_btn_down) {
@@ -2245,8 +2316,7 @@ again:
 			displaybuf_small();
 			printf("B1\n");
 			pwm_duty_t = 198;
-			pwm_events.bits.gooff = 0;
-			pwm_events.bits.goon = 1;
+			chrg_events.bits.goon = 1;
 			btn_state = BTN_DOWN_1_P;
 			break;
 		case BTN_DOWN_2:
@@ -2259,7 +2329,7 @@ again:
 				printf("clear PWM error %d\n", pwm_error);
 				pwm_error = PWME_NOERROR;
 			}
-			pwm_events.bits.gooff = 1;
+			chrg_events.bits.gooff = 1;
 			btn_state = BTN_DOWN_2_P;
 			break;
 		case BTN_UP:
@@ -2276,7 +2346,7 @@ again:
 
 		if (softintrs.bits.int_10hz) {
 			softintrs.bits.int_10hz = 0;
-			if (pwm_fsm == PWMF_RUNNING) {
+			if (chrg_fsm == CHRG_RAMPUP) {
 				if (pwm_duty_c < pwm_duty_t) {
 					pwm_duty_c++;
 					pwm_set_duty();
@@ -2302,7 +2372,7 @@ again:
 				displaybuf_small();
 				oled_col = 54;
 				oled_line = 5;
-				sprintf(oled_displaybuf, "%1x %1x %2x%2x %2x", pwm_fsm, pwm_error, PIR0, PIE0, PORTC);
+				sprintf(oled_displaybuf, "%1x %1x %1x", pwm_fsm, pwm_error, chrg_fsm);
 				displaybuf_small();
 			}
 			if (counter_1hz == 2) {
