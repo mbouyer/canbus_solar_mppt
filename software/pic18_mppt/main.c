@@ -120,6 +120,16 @@ static union pacops_pending {
 u_int pac_refresh_time;
 u_char pac_refresh_valid;
 
+/*
+ * buffer to read voltage/current values at once 
+ * as we're using readreg_be, the register order is inverted
+ * Disabled channels are skipped, so only 3 entries
+ */
+static struct {
+	int16_t batt_i[3];
+	uint16_t batt_v[3];
+} _read_voltcur;
+
 uint16_t batt_v[4];
 int16_t batt_i[4];
 
@@ -129,6 +139,7 @@ pac_ctrl_t pac_ctrl;
 static union pac_events {
 	struct pacevts_bits {
 		char pacavg_rdy : 1;	/* _read_voltcur updated */
+		char pacavg_rdy_chrg : 1;/* _read_voltcur updated for chrg */
 		char pacacc_rdy : 1;	/* _read_accum updated */
 		char bvalues_updated : 1; /* batt_i[] & batt_v[] updated */
 	} bits;
@@ -340,8 +351,11 @@ static volatile union chrg_events {
 	char byte;
 } chrg_events;
 
-static int16_t chrg_previous_current;
-int8_t chrg_duty_change;
+static uint16_t chrg_previous_current;
+static uint16_t chrg_current_accum;
+static uint8_t chrg_accum_cnt;
+static int8_t chrg_duty_change;
+
 
 static void
 chrg_runfsm()
@@ -381,17 +395,21 @@ chrg_runfsm()
 			chrg_fsm = CHRG_GODOWN;
 			return;
 		}
-		if (pac_events.bits.bvalues_updated) {
-			pac_events.bits.bvalues_updated = 0;
+		if (pac_events.bits.pacavg_rdy_chrg) {
 			/*
 			 * if we're pushing more than 300mA to the battery
 			 * we can try MPPT
+			 * battery current is inverted
 			 */
 			/* XXX battselect */
-			if (batt_i[1] > 50) {
-				chrg_previous_current = batt_i[1];
+			if (_read_voltcur.batt_i[1] < -400) {
+				chrg_previous_current =
+				    (uint16_t)(-_read_voltcur.batt_i[1]) * 4;
+				chrg_current_accum = 0;
+				chrg_accum_cnt = 4;
 				chrg_duty_change = 1;
 				chrg_fsm = CHRG_MPPT;
+				pac_events.bits.pacavg_rdy_chrg = 0;
 				return;
 			}
 
@@ -413,16 +431,57 @@ chrg_runfsm()
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
 		}
-		if (pac_events.bits.bvalues_updated) {
-			pac_events.bits.bvalues_updated = 0;
+		if (pac_events.bits.pacavg_rdy_chrg) {
 			/* XXX battselect */
-			if (chrg_previous_current > batt_i[1]) {
-				/* wrong move */
-				chrg_duty_change = -chrg_duty_change;
+			chrg_current_accum +=
+			    (uint16_t)(-_read_voltcur.batt_i[1]);
+			chrg_accum_cnt--;
+			if (chrg_accum_cnt == 0) {
+#if 0
+				char c;
+				c = (chrg_current_accum >> 12) & 0x0f;
+				if (c > 9)
+					usart_putchar('A' - 10 + c);
+				else
+					usart_putchar('0' + c);
+				c = (chrg_current_accum >> 8) & 0x0f;
+				if (c > 9)
+					usart_putchar('A' - 10 + c);
+				else
+					usart_putchar('0' + c);
+				c = (chrg_current_accum >> 4) & 0x0f;
+				if (c > 9)
+					usart_putchar('A' - 10 + c);
+				else
+					usart_putchar('0' + c);
+				c = (chrg_current_accum >> 0) & 0x0f;
+				if (c > 9)
+					usart_putchar('A' - 10 + c);
+				else
+					usart_putchar('0' + c);
+				usart_putchar('_');
+				c = (pwm_duty_c >> 4) & 0x0f;
+				if (c > 9)
+					usart_putchar('A' - 10 + c);
+				else
+					usart_putchar('0' + c);
+				c = (pwm_duty_c >> 0) & 0x0f;
+				if (c > 9)
+					usart_putchar('A' - 10 + c);
+				else
+					usart_putchar('0' + c);
+				usart_putchar(' ');
+#endif
+				if (chrg_previous_current > chrg_current_accum){
+					/* wrong move */
+					chrg_duty_change = -chrg_duty_change;
+				}
+				chrg_previous_current = chrg_current_accum;
+				pwm_duty_c += chrg_duty_change;
+				pwm_set_duty();
+				chrg_accum_cnt = 4;
+				chrg_current_accum = 0;
 			}
-			chrg_previous_current = batt_i[1];
-			pwm_duty_c += chrg_duty_change;
-			pwm_set_duty();
 		}
 		break;
 		
@@ -442,6 +501,7 @@ chrg_runfsm()
 			chrg_fsm = CHRG_DOWN;
 		break;
 	}
+	pac_events.bits.pacavg_rdy_chrg = 0;
 }
 
 #define PAC_I2C_ADDR 0x2e
@@ -500,16 +560,6 @@ static struct {
 	u_char accum[3*7]; 
 	pac_acccnt_t acc_count;
 } _read_accum;
-
-/*
- * buffer to read voltage/current values at once 
- * as we're using readreg_be, the register order is inverted
- * Disabled channels are skipped, so only 3 entries
- */
-static struct {
-	int16_t batt_i[3];
-	uint16_t batt_v[3];
-} _read_voltcur;
 
 static enum {
 	PAC_I2C_IDLE,
@@ -1190,6 +1240,7 @@ pac_command_complete(void)
 		break;
 	case PAC_READ_AVG:
 		pac_events.bits.pacavg_rdy = 1;
+		pac_events.bits.pacavg_rdy_chrg = 1;
 		break;
 	case PAC_READ_ACCUM:
 		pac_events.bits.pacacc_rdy = 1;
@@ -1229,6 +1280,7 @@ pac_command_schedule(void)
 			pacops_pending.bits.read_values = 0;
 			pac_i2c_io.pac_type = PAC_READ_AVG;
 			pac_events.bits.pacavg_rdy = 0;
+			pac_events.bits.pacavg_rdy_chrg = 0;
 		} else {
 			pacops_pending.bits.read_accum = 0;
 			pac_i2c_io.pac_type = PAC_READ_ACCUM;
@@ -2314,7 +2366,12 @@ again:
 			displaybuf_small();
 			printf("B1\n");
 			pwm_duty_t = 198;
-			chrg_events.bits.goon = 1;
+			if (chrg_fsm == CHRG_MPPT)
+				chrg_fsm = CHRG_CV;
+			else if (chrg_fsm == CHRG_CV)
+				chrg_fsm = CHRG_MPPT;
+			else
+				chrg_events.bits.goon = 1;
 			btn_state = BTN_DOWN_1_P;
 			break;
 		case BTN_DOWN_2:
