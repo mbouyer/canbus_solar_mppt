@@ -511,7 +511,13 @@ chrg_runfsm()
 			/* XXX battselect */
 			if ((batt_v[1] / 10) > chrg_volt_target + 1) {
 				chrg_volt_target_cnt++;
-				if (chrg_volt_target_cnt > 100) { /* 1s */
+				/*
+				 * if we're above target + 0.1 for more than
+				 * 1s, or above target + 0.5, switch to
+				 * CV mode.
+				 */
+				if (chrg_volt_target_cnt > 100 || /* 1s */
+				    (batt_v[1] / 10) > chrg_volt_target + 5) {
 					chrg_volt_target_cnt = 0;
 					chrg_fsm = CHRG_CV;
 				}
@@ -530,7 +536,13 @@ chrg_runfsm()
 			/* XXX battselect */
 			if ((batt_v[1] / 10) < chrg_volt_target - 1) {
 				chrg_volt_target_cnt++;
-				if (chrg_volt_target_cnt > 100) { /* 1s */
+				/*
+				 * if we're below target - 0.1 for more than
+				 * 1s, or below target - 0.5, switch to
+				 * MPPT mode.
+				 */
+				if (chrg_volt_target_cnt > 100 || /* 1s */
+				    (batt_v[1] / 10) < chrg_volt_target - 5) {
 					chrg_volt_target_cnt = 0;
 					chrg_duty_change = 8;
 					chrg_fsm = CHRG_MPPT;
