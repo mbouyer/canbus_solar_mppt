@@ -314,7 +314,9 @@ pwm_set_duty()
 #define PWM_MIN_OFF 32
 
 	/* experiments show we can't go above 98% */
-	if (pwm_duty_c > 198)
+	if (pwm_duty_c > 240) /* assume overflow */
+		pwm_duty_c = 0;
+	else if (pwm_duty_c > 198)
 		pwm_duty_c = 198;
 
 	/* first try running at 125Khz */
@@ -355,6 +357,8 @@ static uint16_t chrg_previous_current;
 static uint16_t chrg_current_accum;
 static uint8_t chrg_accum_cnt;
 static int8_t chrg_duty_change;
+static uint8_t chrg_volt_target;
+static uint8_t chrg_volt_target_cnt;
 
 
 static void
@@ -407,7 +411,7 @@ chrg_runfsm()
 				    (uint16_t)(-_read_voltcur.batt_i[1]) * 4;
 				chrg_current_accum = 0;
 				chrg_accum_cnt = 4;
-				chrg_duty_change = 1;
+				chrg_duty_change = 8;
 				chrg_fsm = CHRG_MPPT;
 				pac_events.bits.pacavg_rdy_chrg = 0;
 				return;
@@ -474,13 +478,45 @@ chrg_runfsm()
 #endif
 				if (chrg_previous_current > chrg_current_accum){
 					/* wrong move */
-					chrg_duty_change = -chrg_duty_change;
+					if (chrg_duty_change < 0)
+						chrg_duty_change = 8;
+					else
+						chrg_duty_change = -8;
+				} else {
+					/*
+					 * right move; try a bit faster
+					 *  but only every 8 update cycle
+					 * in the right direction
+					 */
+					if (chrg_duty_change < 0) {
+						chrg_duty_change += -1;
+						if (chrg_duty_change < -64)
+							chrg_duty_change = -64;
+					} else {
+						chrg_duty_change += 1;
+						if (chrg_duty_change > 64)
+							chrg_duty_change = 64;
+					}
 				}
+
 				chrg_previous_current = chrg_current_accum;
-				pwm_duty_c += chrg_duty_change;
+				pwm_duty_c += (chrg_duty_change >> 3);
 				pwm_set_duty();
 				chrg_accum_cnt = 4;
 				chrg_current_accum = 0;
+			}
+		}
+		if (pac_events.bits.bvalues_updated) {
+			pac_events.bits.bvalues_updated = 0;
+			/* XXX battselect */
+			if ((batt_v[1] / 10) > chrg_volt_target + 1) {
+				chrg_volt_target_cnt++;
+				if (chrg_volt_target_cnt > 100) { /* 1s */
+					chrg_volt_target_cnt = 0;
+					chrg_fsm = CHRG_CV;
+				}
+			} else {
+				chrg_volt_target_cnt = 0;
 			}
 		}
 		break;
@@ -488,6 +524,27 @@ chrg_runfsm()
 	case CHRG_CV:
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
+		}
+		if (pac_events.bits.bvalues_updated) {
+			pac_events.bits.bvalues_updated = 0;
+			/* XXX battselect */
+			if ((batt_v[1] / 10) < chrg_volt_target - 1) {
+				chrg_volt_target_cnt++;
+				if (chrg_volt_target_cnt > 100) { /* 1s */
+					chrg_volt_target_cnt = 0;
+					chrg_duty_change = 8;
+					chrg_fsm = CHRG_MPPT;
+				}
+			} else {
+				chrg_volt_target_cnt = 0;
+					
+			}
+			/* XXX battselect */
+			if (batt_v[1] / 10 > chrg_volt_target) 
+				pwm_duty_c--;
+			else if (batt_v[1] / 10 < chrg_volt_target) 
+				pwm_duty_c++;
+			pwm_set_duty();
 		}
 		break;
 
@@ -2183,6 +2240,7 @@ again:
 
 	chrg_fsm = CHRG_DOWN;
 	chrg_events.byte = 0;
+	chrg_volt_target = 140; /* XXX from eeprom ? */
 
 	oled_col = 20;
 	oled_line = 5;
