@@ -88,18 +88,27 @@ batt2_en(char on)
 }
 
 static char counter_100hz;
+static char counter_100hz;
 static char counter_10hz;
-static char counter_1hz;
 static uint16_t seconds;
 static volatile union softintrs {
 	struct softintrs_bits {
-		char int_100hz : 1;	/* 0.1s timer */
+		char int_100hz : 1;	/* 0.01s timer */
 		char int_btn_down : 1;	/* button release->press */
 		char int_btn_up : 1;	/* button press->release */
 		char int_adcc : 1;	/* A/D convertion complete */
 	} bits;
 	char byte;
 } softintrs;
+
+static union time_events {
+	struct tmev_bits {
+		char ev_100hz : 1;	/* 0.01s timer */
+		char ev_10hz : 1;	/* 0.1s timer */
+		char ev_1hz : 1;	/* 1s timer */
+	} bits;
+	char byte;
+} time_events;
 
 static uint16_t ad_pwm;
 static uint16_t ad_solar;
@@ -1772,9 +1781,10 @@ main(void)
 
 	softintrs.byte = 0;
 	counter_100hz = 10;
+	counter_100hz = 10;
 	counter_10hz = 10;
-	counter_1hz = 10;
 	seconds = 0;
+	time_events.byte = 0;
 
 	for (c = 0; c < 4; c++) {
 		voltages_acc_cur[c] = 0;
@@ -2323,6 +2333,22 @@ again:
 	printf("enter loop\n");
 
 	while (1) {
+		time_events.byte = 0;
+		if (softintrs.bits.int_100hz) {
+			softintrs.bits.int_100hz = 0;
+			time_events.bits.ev_100hz = 1;
+			counter_100hz--;
+			if (counter_100hz == 0) {
+				counter_100hz = 10;
+				time_events.bits.ev_10hz = 1;
+				counter_10hz--;
+				if (counter_10hz == 0) {
+					counter_10hz = 10;
+					time_events.bits.ev_1hz = 1;
+				}
+			}
+		}
+				
 		CLRWDT();
 		if (C1INTLbits.RXIF) {
 			nmea2000_receive();
@@ -2469,11 +2495,9 @@ again:
 			break;
 		}
 
-		if (softintrs.bits.int_100hz) {
-			softintrs.bits.int_100hz = 0;
-			counter_10hz--;
+		if (time_events.bits.ev_100hz) {
 			/* read PAC values every 10ms, but also accum every s */
-			if (counter_10hz == 1 && counter_1hz == 1) {
+			if (counter_100hz == 1 && counter_10hz == 1) {
 				pacops_pending.bits.refresh = 1;
 				pacops_pending.bits.read_accum = 1;
 			} else {
@@ -2481,10 +2505,8 @@ again:
 			}
 			pacops_pending.bits.read_values = 1;
 		}
-		if (counter_10hz == 0) {
-			counter_10hz = 10;
-			counter_1hz--;
-			if (counter_1hz == 2) {
+		if (time_events.bits.ev_10hz) {
+			if (counter_10hz == 2) {
 				adctotemp(0);
 				oled_col = 60;
 				oled_line = 1;
@@ -2504,7 +2526,7 @@ again:
 			sprintf(oled_displaybuf, "%1x %1x %1x %2x", pwm_fsm, pwm_error, chrg_fsm, pwm_duty_c);
 			displaybuf_small();
 		
-			if ((counter_1hz & 1) == 1) {
+			if ((counter_10hz & 1) == 1) {
 				double amps;
 				/* update display 5 times per second */
 				/* solar */
@@ -2522,9 +2544,7 @@ again:
 			}
 
 
-			if (counter_1hz == 0) {
-				counter_1hz = 10;
-				pacops_pending.bits.read_accum = 1;
+			if (time_events.bits.ev_1hz) {
 				seconds++;
 				if (seconds == 600) {
 					// USELOG update_log();
@@ -2687,8 +2707,8 @@ void __interrupt(__irq(TMR2), __high_priority, base(IVECT_BASE))
 irqh_timer2(void)
 {
 	PIR3bits.TMR2IF = 0;
-	if (--counter_10hz == 0) {
-		counter_10hz = 25;
+	if (--counter_250hz == 0) {
+		counter_250hz = 25;
 		softintrs.bits.int_10hz = 1;
 	}			
 }
