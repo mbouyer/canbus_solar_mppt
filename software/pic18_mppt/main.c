@@ -1570,7 +1570,7 @@ oled_i2c_reset(void)
 }
 #define OLED_CTRL_WRITE {oled_s->oled_type = OLED_CTRL_CMD; oled_i2c_state = OLED_I2C_WAIT; oled_i2c_flush(); oled_i2c_reset();}
 	
-static void
+static uint8_t
 displaybuf_small(void)
 {
 	const u_char *font;
@@ -1580,7 +1580,7 @@ displaybuf_small(void)
 	struct oled_i2c_buf_s *oled_s;
 
 	if ((oled_s = oled_i2c_reset()) == NULL)
-		return;
+		return 0;
 
 	len = 0;
 	for (cp = oled_displaybuf; *cp != '\0'; cp++) {
@@ -1605,9 +1605,10 @@ displaybuf_small(void)
 	oled_s->oled_type = OLED_CTRL_DISPLAY;
 	if (oled_i2c_state == OLED_I2C_IDLE)
 		oled_i2c_state = OLED_I2C_WAIT;
+	return 1;
 }
 
-static void
+static uint8_t
 displaybuf_medium(void)
 {
 	const u_char *font;
@@ -1616,7 +1617,7 @@ displaybuf_medium(void)
 	struct oled_i2c_buf_s *oled_s;
 
 	if ((oled_s = oled_i2c_reset()) == NULL)
-		return;
+		return 0;
 	/* unfortunably we can't build the two lines in a single loop */
 	for (n = 0, cp = oled_displaybuf; *cp != '\0'; cp++) {
 		font = get_font10x16(*cp);
@@ -1638,9 +1639,10 @@ displaybuf_medium(void)
 	oled_s->oled_type = OLED_CTRL_DISPLAY;
 	if (oled_i2c_state == OLED_I2C_IDLE)
 		oled_i2c_state = OLED_I2C_WAIT;
+	return 1;
 }
 
-static void
+static uint8_t
 displaybuf_icon(char ic)
 {
 	const u_char *icon;
@@ -1649,7 +1651,7 @@ displaybuf_icon(char ic)
 	struct oled_i2c_buf_s *oled_s;
 
 	if ((oled_s = oled_i2c_reset()) == NULL)
-		return;
+		return 0;
 	icon = get_icons16x16(ic);
 	for (i = 0; i < 16; i++) {
 		oled_s->oled_databuf[i] = icon[i * 2];
@@ -1663,10 +1665,36 @@ displaybuf_icon(char ic)
 	oled_s->oled_type = OLED_CTRL_DISPLAY;
 	if (oled_i2c_state == OLED_I2C_IDLE)
 		oled_i2c_state = OLED_I2C_WAIT;
+	return 1;
 }
 
+static uint8_t
+display_clear()
+{
+	struct oled_i2c_buf_s *oled_s;
+	if ((oled_s = oled_i2c_reset()) == NULL)
+		return 0;
+	memset(oled_s->oled_databuf, 0, OLED_I2C_DATABUFSZ);
+	oled_s->oled_datalen = OLED_DISPLAY_SIZE;
+	OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x10);  /* reset column start */
+	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, 0); OLED_CTRL(oled_s, 0x7f); /*column start/end */
+	OLED_CTRL(oled_s, 0xb0); /* page start */
+	oled_s->oled_type = OLED_CTRL_CLEAR;
+	if (oled_i2c_state == OLED_I2C_IDLE)
+		oled_i2c_state = OLED_I2C_WAIT;
+	return 1;
+}
+
+/*
+ * page status:
+ *  0: update state
+ *  > 0: init state, with multiple init steps\
+ * set to 1 on page switch
+ */
+uint8_t page_status; 
+
 static void
-dislplay_battstat(u_char b)
+battstat2buf(u_char b)
 {
 	double amps = (double)batt_i[b] / 100;
 	double volts = (double)batt_v[b] / 100;
@@ -1687,8 +1715,71 @@ dislplay_battstat(u_char b)
 			    "%2.01fV\n%1.02fA", volts, amps);
 		}
 	}
-	displaybuf_small();
 }
+
+static void
+display_battstat_small_init() {
+	switch(page_status) {
+	case 1:
+		/* clear display and put static infos */
+		if (display_clear() == 0)
+			return;
+		page_status++;
+		/* fallthrough */
+	case 2:
+		oled_col = 0;
+		oled_line = 0;
+		if (displaybuf_icon(ICON_SUN) == 0)
+			return;
+		page_status++;
+		/* fallthrough */
+	case 3:
+		oled_col = 0;
+		oled_line = 3;
+		if (displaybuf_icon(ICON_LIGHT) == 0)
+			return;
+		page_status++;
+		/* fallthrough */
+	case 4:
+		oled_col = 0;
+		oled_line = 6;
+		if (displaybuf_icon(ICON_ENGINE) == 0)
+			return;
+		/* fallthrough */
+	default:
+		page_status = 0;
+	}
+	return;
+}
+
+/* to be called on ev_10hz event */
+static void
+display_battstat_small() {
+	if (page_status != 0) {
+		display_battstat_small_init();
+		return;
+	}
+	if ((counter_10hz & 1) == 1) {
+		double amps;
+		/* update display 5 times per second */
+		/* solar */
+		oled_col = 20;
+		oled_line = 0;
+		battstat2buf(2);
+		displaybuf_small();
+		/* batt1 (service) */
+		oled_col = 20;
+		oled_line = 3;
+		battstat2buf(1);
+		displaybuf_small();
+		/* batt2 (engine) */
+		oled_col = 20;
+		oled_line = 6;
+		battstat2buf(0);
+		displaybuf_small();
+	}
+}
+
 
 int
 main(void)
@@ -2298,31 +2389,10 @@ again:
 		}
 	}
 
-	/* clear display and put static infos */
-	oled_s = oled_i2c_reset();
-	memset(oled_s->oled_databuf, 0, OLED_I2C_DATABUFSZ);
-	oled_s->oled_datalen = OLED_DISPLAY_SIZE;
-	OLED_CTRL(oled_s, 0x00); OLED_CTRL(oled_s, 0x10);  /* reset column start */
-	OLED_CTRL(oled_s, 0x21); OLED_CTRL(oled_s, 0); OLED_CTRL(oled_s, 0x7f); /*column start/end */
-	OLED_CTRL(oled_s, 0xb0); /* page start */
-	oled_s->oled_type = OLED_CTRL_CLEAR;
-	oled_i2c_state = OLED_I2C_WAIT;
+	/* clear display */
+	display_clear();
 	oled_i2c_flush();
-
-	oled_col = 0;
-	oled_line = 0;
-	displaybuf_icon(ICON_SUN);
-	oled_i2c_flush();
-
-	oled_col = 0;
-	oled_line = 3;
-	displaybuf_icon(ICON_LIGHT);
-	oled_i2c_flush();
-
-	oled_col = 0;
-	oled_line = 6;
-	displaybuf_icon(ICON_ENGINE);
-	oled_i2c_flush();
+	page_status = 1;
 
 	PIR2bits.ADCH3IF = 0;
 	PIE2bits.ADCH3IE = 1;
@@ -2518,7 +2588,7 @@ again:
 				displaybuf_small();
 				oled_col = 60;
 				oled_line = 3;
-				sprintf(oled_displaybuf, "%2.2fx", (float)board_temp / 100.0 - 273.15);
+				sprintf(oled_displaybuf, "%2.2f%c", (float)board_temp / 100.0 - 273.15, 20);
 				displaybuf_small();
 			}
 			oled_col = 54;
@@ -2526,23 +2596,7 @@ again:
 			sprintf(oled_displaybuf, "%1x %1x %1x %2x", pwm_fsm, pwm_error, chrg_fsm, pwm_duty_c);
 			displaybuf_small();
 		
-			if ((counter_10hz & 1) == 1) {
-				double amps;
-				/* update display 5 times per second */
-				/* solar */
-				oled_col = 20;
-				oled_line = 0;
-				dislplay_battstat(2);
-				/* batt1 (service) */
-				oled_col = 20;
-				oled_line = 3;
-				dislplay_battstat(1);
-				/* batt2 (engine) */
-				oled_col = 20;
-				oled_line = 6;
-				dislplay_battstat(0);
-			}
-
+			display_battstat_small();
 
 			if (time_events.bits.ev_1hz) {
 				seconds++;
