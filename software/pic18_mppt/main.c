@@ -1694,7 +1694,7 @@ display_clear()
 uint8_t page_status; 
 
 static void
-battstat2buf(u_char b)
+battstat2buf_small(u_char b)
 {
 	double amps = (double)batt_i[b] / 100;
 	double volts = (double)batt_v[b] / 100;
@@ -1715,13 +1715,15 @@ battstat2buf(u_char b)
 			    "%2.01fV\n%1.02fA", volts, amps);
 		}
 	}
+	displaybuf_small();
 }
 
 static void
-display_battstat_small_init() {
+display_battstat_small_init()
+{
+	/* clear display and put static infos */
 	switch(page_status) {
 	case 1:
-		/* clear display and put static infos */
 		if (display_clear() == 0)
 			return;
 		page_status++;
@@ -1745,16 +1747,19 @@ display_battstat_small_init() {
 		oled_line = 6;
 		if (displaybuf_icon(ICON_ENGINE) == 0)
 			return;
+		page_status++;
 		/* fallthrough */
 	default:
-		page_status = 0;
+		/* set page_status to 0 in calling page */
+		break;
 	}
 	return;
 }
 
 /* to be called on ev_10hz event */
 static void
-display_battstat_small() {
+display_battstat_small()
+{
 	if (page_status != 0) {
 		display_battstat_small_init();
 		return;
@@ -1765,21 +1770,163 @@ display_battstat_small() {
 		/* solar */
 		oled_col = 20;
 		oled_line = 0;
-		battstat2buf(2);
+		battstat2buf_small(2);
+		/* batt1 (service) */
+		oled_col = 20;
+		oled_line = 3;
+		battstat2buf_small(1);
+		/* batt2 (engine) */
+		oled_col = 20;
+		oled_line = 6;
+		battstat2buf_small(0);
+	}
+}
+
+static void
+display_battstat_debug()
+{
+	display_battstat_small();
+	if (page_status != 0) {
+		if (page_status == 5) {
+			page_status = 0;
+		}
+		return;
+	}
+	/*
+	 * once per second display adc output and temperature 
+	 * choose a counter_10hz value that doesn't conflict with
+	 * display_battstat_small();
+	 */
+	if (counter_10hz == 2) {
+		adctotemp(0);
+		oled_col = 60;
+		oled_line = 1;
+		sprintf(oled_displaybuf, "%4x", ad_pwm);
 		displaybuf_small();
+		oled_col = 60;
+		oled_line = 2;
+		sprintf(oled_displaybuf, "%4x", ad_solar);
+		displaybuf_small();
+		oled_col = 60;
+		oled_line = 3;
+		sprintf(oled_displaybuf, "%2.2f%c", (float)board_temp / 100.0 - 273.15, 20);
+		displaybuf_small();
+	}
+	/* display charger and pwm states 10 times per second */
+	oled_col = 54;
+	oled_line = 5;
+	sprintf(oled_displaybuf, "%1x %1x %1x %2x", pwm_fsm, pwm_error, chrg_fsm, pwm_duty_c);
+	displaybuf_small();
+}
+
+
+static void
+battstat2buf(u_char b)
+{
+	double amps = (double)batt_i[b] / 100;
+	double volts = (double)batt_v[b] / 100;
+	if (amps > 9.99 || amps < 0) {
+		if (volts < 10.0) {
+			sprintf(oled_displaybuf,
+			    " %1.01f -.--", volts);
+		} else {
+			sprintf(oled_displaybuf,
+			    "%2.01f -.--", volts);
+		}
+	} else {
+		if (volts < 10.0) {
+			sprintf(oled_displaybuf,
+			    " %1.01f %1.02f", volts, amps);
+		} else {
+			sprintf(oled_displaybuf,
+			    "%2.01f %1.02f", volts, amps);
+		}
+	}
+	displaybuf_medium();
+}
+
+static void
+display_battstat_init()
+{
+	/* clear display and put static infos */
+	switch(page_status) {
+	case 1:
+	case 2:
+	case 3:
+	case 4:
+		display_battstat_small_init();
+		return;
+	case 5:
+		oled_col = 40; /* 20 + 2 * 10 */
+		oled_line = 2;
+		sprintf(oled_displaybuf, "V       A");
+		if (displaybuf_small() == 0)
+			return;
+		/* fallthrough */
+	default:
+		page_status = 0;
+	}
+	return;
+}
+
+static void
+display_battstat()
+{
+	if (page_status != 0) {
+		display_battstat_init();
+		return;
+	}
+	if ((counter_10hz & 1) == 1) {
+		double amps;
+		/* update display 5 times per second */
+		/* solar */
+		oled_col = 20;
+		oled_line = 0;
+		battstat2buf(2);
 		/* batt1 (service) */
 		oled_col = 20;
 		oled_line = 3;
 		battstat2buf(1);
-		displaybuf_small();
 		/* batt2 (engine) */
 		oled_col = 20;
 		oled_line = 6;
 		battstat2buf(0);
-		displaybuf_small();
 	}
 }
 
+typedef enum {
+	PAGE_BATTSTAT,
+	PAGE_BATTSTAT_DEBUG,
+} page_t;
+
+static page_t active_page;
+
+static void
+display_page()
+{
+	switch(active_page) {
+	case PAGE_BATTSTAT:
+		display_battstat();
+		break;
+	case PAGE_BATTSTAT_DEBUG:
+		display_battstat_debug();
+		break;
+	}
+}
+
+static void
+next_page()
+{
+	page_status = 1;
+	switch(active_page) {
+	case PAGE_BATTSTAT:
+		active_page = PAGE_BATTSTAT_DEBUG;
+		break;
+	case PAGE_BATTSTAT_DEBUG:
+		active_page = PAGE_BATTSTAT;
+		break;
+	}
+}
 
 int
 main(void)
@@ -2393,6 +2540,7 @@ again:
 	display_clear();
 	oled_i2c_flush();
 	page_status = 1;
+	active_page = 0;
 
 	PIR2bits.ADCH3IF = 0;
 	PIE2bits.ADCH3IE = 1;
@@ -2454,7 +2602,12 @@ again:
 		if (softintrs.bits.int_btn_up) {
 			switch(btn_state) {
 			case BTN_DOWN_1_P:
+				softintrs.bits.int_btn_up = 0;
+				/* this is a up event */
+				btn_state = BTN_UP;
+				break;
 			case BTN_DOWN_2_P:
+				next_page();
 				softintrs.bits.int_btn_up = 0;
 				/* this is a up event */
 				btn_state = BTN_UP;
@@ -2576,28 +2729,8 @@ again:
 			pacops_pending.bits.read_values = 1;
 		}
 		if (time_events.bits.ev_10hz) {
-			if (counter_10hz == 2) {
-				adctotemp(0);
-				oled_col = 60;
-				oled_line = 1;
-				sprintf(oled_displaybuf, "%4x", ad_pwm);
-				displaybuf_small();
-				oled_col = 60;
-				oled_line = 2;
-				sprintf(oled_displaybuf, "%4x", ad_solar);
-				displaybuf_small();
-				oled_col = 60;
-				oled_line = 3;
-				sprintf(oled_displaybuf, "%2.2f%c", (float)board_temp / 100.0 - 273.15, 20);
-				displaybuf_small();
-			}
-			oled_col = 54;
-			oled_line = 5;
-			sprintf(oled_displaybuf, "%1x %1x %1x %2x", pwm_fsm, pwm_error, chrg_fsm, pwm_duty_c);
-			displaybuf_small();
+			display_page();
 		
-			display_battstat_small();
-
 			if (time_events.bits.ev_1hz) {
 				seconds++;
 				if (seconds == 600) {
