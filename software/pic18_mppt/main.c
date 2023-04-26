@@ -2102,22 +2102,22 @@ main(void)
 	/* set up ADC */
 	ADCON0 = 0x4; /* right-justified */
 	ADCLK = 7; /* Fosc/16 */
-	/* context 0: PWM_v */
+	/* context 0: solar_v */
 	ADCTX = 0;
 	ADCON1 = 0; /* no cap */
 	ADCON2 = 0; /* basic mode */
 	ADCON3 = 0x08; /* SOI */
 	ADREF = 2;  /* vref = vref+ (RA3) */
-	ADPCH = 0; /* RA0 */
+	ADPCH = 2; /* RA2 */
 	ADACQH = 0;
 	ADACQL = 20; /* 20Tad Aq */
-	/* context 1: solar_v */
+	/* context 1: PWM_v */
 	ADCTX = 1;
 	ADCON1 = 0; /* no cap */
 	ADCON2 = 0; /* basic mode */
 	ADCON3 = 0x08; /* SOI */
 	ADREF = 2;  /* vref = vref+ (RA3) */
-	ADPCH = 2; /* RA2 */
+	ADPCH = 0; /* RA0 */
 	ADACQH = 0;
 	ADACQL = 20; /* 20Tad Aq */
 	/* XXX setup thresholds */
@@ -2650,9 +2650,9 @@ again:
 				ADCON0bits.CSEN = 0;
 				/* save channel values */
 				ADCTX = 0;
-				ad_pwm = ADRES;
-				ADCTX = 1;
 				ad_solar = ADRES;
+				ADCTX = 1;
+				ad_pwm = ADRES;
 				ADCTX = 2;
 				ad_temp = ADRES;
 				break;
