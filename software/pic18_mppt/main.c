@@ -369,19 +369,24 @@ pwm_set_duty()
 	PWM1CONbits.LD = 1;
 }
 
-static enum {
+typedef enum {
 	CHRG_DOWN = 0,
 	CHRG_PWMUP,
 	CHRG_RAMPUP,
 	CHRG_MPPT,
 	CHRG_CV,
+	CHRG_BSWITCH,
+	CHRG_BSWITCH_WAIT,
 	CHRG_GODOWN
-} chrg_fsm;
+} chrg_fsm_t;
+
+static chrg_fsm_t chrg_fsm;
 
 static volatile union chrg_events {
 	struct chrg_evtbits {
-		char goon : 1;	/* turn PWM on */
-		char gooff : 1; /* turn PWM off */
+		char goon : 1;	/* turn charger on */
+		char gooff : 1; /* turn charger off */
+		char battswitch : 1; /* cause a battery switch */
 	} bits;
 	char byte;
 } chrg_events;
@@ -408,6 +413,7 @@ typedef enum {
 typedef struct {
 	batt_state_t bc_stat;
 	uint16_t bc_cv; /* target voltage */
+	chrg_fsm_t bc_chrg_fsm; /* chrg state to resume at */
 	struct chrg_param bc_chrg; /* current chrg state */
 	struct chrg_param bc_r_chrg; /* best chrg state during rampup */
 } batt_context_t;
@@ -419,6 +425,35 @@ static batt_context_t battctx[2];
 #define active_batti (batt_i[active_bidx])
 
 #define BATT_MINV 80 /* if battery below 8V don't start chrg */
+
+static char
+batt_switch_active()
+{
+	switch(active_batt) {
+	case BATT_1:
+		if (battctx[BATT_2 - BATT_1].bc_stat != BATTS_NONE &&
+		    battctx[BATT_2 - BATT_1].bc_stat != BATTS_ERR) {
+			printf("bact 1 2\n");
+			active_batt = BATT_2;
+			return 1;
+		}
+		break;
+	case BATT_2:
+		if (battctx[BATT_1 - BATT_1].bc_stat != BATTS_NONE &&
+		    battctx[BATT_1 - BATT_1].bc_stat != BATTS_ERR) {
+			active_batt = BATT_1;
+			printf("bact 2 1\n");
+			return 1;
+		}
+		break;
+	default:
+		break;
+	}
+	return 0;
+}
+
+
+u_int chrg_time;
 
 static void
 chrg_runfsm()
@@ -599,6 +634,16 @@ chrg_runfsm()
 				chrg_volt_target_cnt = 0;
 			}
 		}
+		if (chrg_events.bits.battswitch &&
+		    chrg_current_accum == 0 && chrg_volt_target_cnt == 0 &&
+		    chrg_fsm == CHRG_MPPT) {
+			chrg_events.bits.battswitch = 0;
+			active_battctx.bc_chrg_fsm = chrg_fsm;
+			active_battctx.bc_chrg.chrgp_pwm = pwm_duty_c;
+			active_battctx.bc_chrg.chrgp_iout =
+			    chrg_previous_current / 4;
+			chrg_fsm = CHRG_BSWITCH;
+		}
 		break;
 		
 	case CHRG_CV:
@@ -620,10 +665,16 @@ chrg_runfsm()
 					pwm_set_duty();
 					active_battctx.bc_r_chrg.chrgp_iout = -1;
 					chrg_fsm = CHRG_RAMPUP;
+					chrg_volt_target_cnt = 0;
 				}
 			} else {
 				chrg_volt_target_cnt = 0;
-					
+				if (chrg_events.bits.battswitch) {
+					chrg_events.bits.battswitch = 0;
+					active_battctx.bc_chrg_fsm = chrg_fsm;
+					active_battctx.bc_chrg.chrgp_pwm = pwm_duty_c;
+					chrg_fsm = CHRG_BSWITCH;
+				}
 			}
 			if (active_battv / 10 > active_battctx.bc_cv) 
 				pwm_duty_c--;
@@ -633,6 +684,43 @@ chrg_runfsm()
 		}
 		break;
 
+	case CHRG_BSWITCH:
+		if (chrg_events.bits.gooff) {
+			chrg_fsm = CHRG_GODOWN;
+		} else if (batt_switch_active()) {
+			pwm_duty_c = 0;
+			pwm_set_duty();
+			batt_en(0);
+			switch(pwm_fsm) {
+			case PWMF_RUNNING:
+			case PWMF_IDLE:
+				pwm_fsm = PWMF_IDLE;
+				chrg_time = timer0_read();
+				chrg_fsm = CHRG_BSWITCH_WAIT;
+				break;
+			default:
+				chrg_fsm = CHRG_GODOWN;
+				break;
+			}
+		}
+		break;
+	case CHRG_BSWITCH_WAIT:
+		if (chrg_events.bits.gooff) {
+			chrg_fsm = CHRG_GODOWN;
+		} else if ((timer0_read() - chrg_time) > TIMER0_1MS) {
+			batt_en(active_batt);
+			chrg_volt_target_cnt = 0;
+			chrg_current_accum = 0;
+			chrg_accum_cnt = 4;
+			chrg_duty_change = 8;
+			chrg_fsm = active_battctx.bc_chrg_fsm;
+			pwm_duty_c = active_battctx.bc_chrg.chrgp_pwm;
+			chrg_previous_current =
+			    (uint16_t)active_battctx.bc_chrg.chrgp_iout * 4;
+			pwm_set_duty();
+			pwm_fsm = PWMF_RUNNING;
+		}
+		break;
 	case CHRG_GODOWN:
 		if (chrg_events.bits.gooff) {
 			chrg_events.bits.gooff = 0;
@@ -1878,7 +1966,7 @@ display_battstat_debug()
 	/* display charger and pwm states 10 times per second */
 	oled_col = 54;
 	oled_line = 5;
-	sprintf(oled_displaybuf, "%1x %1x %1x %2x", pwm_fsm, pwm_error, chrg_fsm, pwm_duty_c);
+	sprintf(oled_displaybuf, "%1x %1x %1x %2x %1x", pwm_fsm, pwm_error, chrg_fsm, pwm_duty_c, active_batt);
 	displaybuf_small();
 }
 
@@ -2569,6 +2657,8 @@ again:
 	battctx[BATT_1 - BATT_1].bc_cv = 140; /* XXX from eeprom ? */
 	battctx[BATT_2 - BATT_1].bc_stat = BATTS_NONE;
 	battctx[BATT_1 - BATT_1].bc_stat = BATTS_NONE;
+	battctx[BATT_2 - BATT_1].bc_chrg_fsm = CHRG_RAMPUP;
+	battctx[BATT_1 - BATT_1].bc_chrg_fsm = CHRG_RAMPUP;
 
 	oled_col = 20;
 	oled_line = 5;
@@ -2781,6 +2871,8 @@ again:
 			if (pwm_error != PWME_NOERROR) {
 				printf("clear PWM error %d\n", pwm_error);
 				pwm_error = PWME_NOERROR;
+			} else if (pwm_fsm == PWMF_RUNNING) {
+				chrg_events.bits.battswitch = 1;
 			} else {
 				chrg_events.bits.goon = 1;
 			}
