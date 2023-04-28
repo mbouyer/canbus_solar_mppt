@@ -207,7 +207,8 @@ static enum {
 
 uint16_t pwm_time;
 
-uint8_t pwm_duty_t, pwm_duty_c; /* duty cycle in % * 2 */
+uint8_t pwm_duty_c; /* duty cycle in % * 2 */
+#define PWM_DUTY_MAX 198
 
 static inline void
 pwmf_goidle()
@@ -369,6 +370,16 @@ static int8_t chrg_duty_change;
 static uint8_t chrg_volt_target;
 static uint8_t chrg_volt_target_cnt;
 
+struct chrg_param {
+	uint8_t chrgp_pwm; /* pwm value */
+	int16_t chrgp_iout; /* intensity output */
+};
+
+/* during rampup, keep the 5 best pwm values */
+#define CHRG_NBEST 5
+static struct chrg_param chrg_best[CHRG_NBEST];
+
+
 
 static void
 chrg_runfsm()
@@ -399,7 +410,11 @@ chrg_runfsm()
 			    PWM1S1P1,
 			    PORTB,
 			    PORTC);
+			for (char i = 0; i < CHRG_NBEST; i++) {
+				chrg_best[i].chrgp_iout = -1;
+			}
 			chrg_fsm = CHRG_RAMPUP;
+
 		}
 		break;
 
@@ -409,33 +424,49 @@ chrg_runfsm()
 			return;
 		}
 		if (pac_events.bits.pacavg_rdy_chrg) {
-			/*
-			 * if we're pushing more than 300mA to the battery
-			 * we can try MPPT
-			 * battery current is inverted
-			 */
 			/* XXX battselect */
-			if (_read_voltcur.batt_i[1] < -400) {
-				chrg_previous_current =
-				    (uint16_t)(-_read_voltcur.batt_i[1]) * 4;
-				chrg_current_accum = 0;
-				chrg_accum_cnt = 4;
-				chrg_duty_change = 8;
-				chrg_fsm = CHRG_MPPT;
-				pac_events.bits.pacavg_rdy_chrg = 0;
-				return;
-			}
-
-			if (pwm_duty_c < pwm_duty_t) {
-				pwm_duty_c++;
-				if (pwm_duty_c > 198)
-					pwm_duty_c = 198;
-				pwm_set_duty();
-			} else if (pwm_duty_c > pwm_duty_t) {
-				pwm_duty_c--;
-				if (pwm_duty_c < 10)
-					pwm_duty_c = 10;
-				pwm_set_duty();
+			if ((batt_v[1] / 10) > chrg_volt_target) {
+				/* if we're at target voltage go to CV mode */
+				chrg_volt_target_cnt = 0;
+				chrg_fsm = CHRG_CV;
+			} else {
+				char i;
+				/* XXX battselect */
+				/* battery current is inverted */
+				int16_t battcur = -_read_voltcur.batt_i[1];
+				for (i = 0; i < CHRG_NBEST; i++) {
+					if (chrg_best[i].chrgp_iout < battcur)
+						break;
+				}
+				if (i < CHRG_NBEST) {
+					/* we have a better candidate */
+					for (char j = CHRG_NBEST; j > i; j--)
+						chrg_best[j] = chrg_best[j-1];
+					
+					chrg_best[i].chrgp_iout = battcur;
+					chrg_best[i].chrgp_pwm = pwm_duty_c;
+				}
+				if (pwm_duty_c == PWM_DUTY_MAX) {
+					/* scan done */
+					printf("end scan ");
+					for (i = 0; i < CHRG_NBEST; i++) {
+						printf("pwm %d curr %d ",
+						    chrg_best[i].chrgp_pwm,
+						    chrg_best[i].chrgp_iout);
+					}
+					printf("\n");
+					pwm_duty_c = chrg_best[0].chrgp_pwm;
+					pwm_set_duty();
+					chrg_current_accum = 0;
+					chrg_accum_cnt = 4;
+					chrg_duty_change = 8;
+					chrg_fsm = CHRG_MPPT;
+				} else {
+					pwm_duty_c += 5;
+					if (pwm_duty_c > PWM_DUTY_MAX)
+						pwm_duty_c = PWM_DUTY_MAX;
+					pwm_set_duty();
+				}
 			}
 		}
 		break;
@@ -2684,13 +2715,12 @@ again:
 			sprintf(oled_displaybuf, "  B1 ");
 			displaybuf_small();
 			printf("B1\n");
-			pwm_duty_t = 198;
-			if (chrg_fsm == CHRG_MPPT)
-				chrg_fsm = CHRG_CV;
-			else if (chrg_fsm == CHRG_CV)
-				chrg_fsm = CHRG_MPPT;
-			else
+			if (pwm_error != PWME_NOERROR) {
+				printf("clear PWM error %d\n", pwm_error);
+				pwm_error = PWME_NOERROR;
+			} else {
 				chrg_events.bits.goon = 1;
+			}
 			btn_state = BTN_DOWN_1_P;
 			break;
 		case BTN_DOWN_2:
@@ -2699,10 +2729,6 @@ again:
 			sprintf(oled_displaybuf, "  B2 ");
 			displaybuf_small();
 			printf("B2\n");
-			if (pwm_error != PWME_NOERROR) {
-				printf("clear PWM error %d\n", pwm_error);
-				pwm_error = PWME_NOERROR;
-			}
 			chrg_events.bits.gooff = 1;
 			btn_state = BTN_DOWN_2_P;
 			break;
