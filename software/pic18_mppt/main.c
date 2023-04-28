@@ -203,7 +203,10 @@ static enum {
 	PWME_NOERROR = 0,
 	PWME_PWMV,
 	PWME_PWMOK,
+	PWME_OVERTEMP,
 } pwm_error;
+
+#define TEMP_MAX (27315 + 7000) /* 70 deg celius */
 
 uint16_t pwm_time;
 uint8_t pwme_time;
@@ -1831,7 +1834,6 @@ display_battstat_debug()
 	 * display_battstat_small();
 	 */
 	if (counter_10hz == 2) {
-		adctotemp(0);
 		oled_col = 60;
 		oled_line = 1;
 		sprintf(oled_displaybuf, "%4x", ad_pwm);
@@ -2622,15 +2624,32 @@ again:
 			}
 		}
 
+		if (time_events.bits.ev_1hz) {
+			adctotemp(0);
+			if (board_temp > TEMP_MAX &&
+			    chrg_fsm != CHRG_DOWN) {
+				pwm_error = PWME_OVERTEMP;
+				pwm_events.bits.gooff = 1;
+			}
+		}
+
 		chrg_runfsm();
 		pwm_runfsm();
 
 		if (time_events.bits.ev_10hz &&
 		    chrg_fsm == CHRG_DOWN && pwm_error != PWME_NOERROR) {
-			pwme_time++;
-			if (pwme_time >= 10) {
-				pwm_error = PWME_NOERROR;
-				chrg_events.bits.goon = 1;
+			if (pwm_error == PWME_OVERTEMP) {
+				/* restart when below max - 10deg */
+				if (board_temp < (TEMP_MAX - 1000)) {
+					pwm_error = PWME_NOERROR;
+					chrg_events.bits.goon = 1;
+				}
+			} else {
+				pwme_time++;
+				if (pwme_time >= 10) {
+					pwm_error = PWME_NOERROR;
+					chrg_events.bits.goon = 1;
+				}
 			}
 		}
 
