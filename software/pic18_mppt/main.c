@@ -415,6 +415,8 @@ typedef struct {
 static batt_context_t battctx[2];
 #define active_battctx (battctx[active_batt - BATT_1])
 
+#define BATT_MINV 80 /* if battery below 8V don't start chrg */
+
 static void
 chrg_runfsm()
 {
@@ -434,20 +436,26 @@ chrg_runfsm()
 	case CHRG_PWMUP:
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
-		} else if (pwm_fsm == PWMF_IDLE) {
-			batt_en(active_batt);
-			pwm_duty_c = 20; /* start at 10% */
-			pwm_set_duty();
-			active_battctx.bc_r_chrg.chrgp_iout = -1;
-			pwm_fsm = PWMF_RUNNING;
-			printf("PWM RUN CON 0x%x PR 0x%x P1 0x%x B 0x%x C 0x%x\n", 
-			    PWM1CON,
-			    PWM1PR,
-			    PWM1S1P1,
-			    PORTB,
-			    PORTC);
-			chrg_fsm = CHRG_RAMPUP;
-
+		} else if (pwm_fsm == PWMF_IDLE && active_batt != BATT_NONE) {
+			if (active_battctx.bc_stat != BATTS_NONE &&
+			    active_battctx.bc_stat != BATTS_ERR) {
+				batt_en(active_batt);
+				pwm_duty_c = 20; /* start at 10% */
+				pwm_set_duty();
+				active_battctx.bc_r_chrg.chrgp_iout = -1;
+				pwm_fsm = PWMF_RUNNING;
+				printf("PWM RUN CON 0x%x PR 0x%x P1 0x%x act %d\n", 
+				    PWM1CON,
+				    PWM1PR,
+				    PWM1S1P1,
+				    active_batt);
+				chrg_fsm = CHRG_RAMPUP;
+			} else {
+				if (active_batt == BATT_1)
+					active_batt = BATT_2;
+				else
+					active_batt = BATT_1;
+			}
 		}
 		break;
 
@@ -2557,8 +2565,11 @@ again:
 	chrg_fsm = CHRG_DOWN;
 	chrg_events.byte = 0;
 
-	active_batt = BATT_2; /* XXX battsel */
-	active_battctx.bc_cv = 140; /* XXX from eeprom ? */
+	active_batt = BATT_1; /* XXX battsel */
+	battctx[BATT_2 - BATT_1].bc_cv = 140; /* XXX from eeprom ? */
+	battctx[BATT_1 - BATT_1].bc_cv = 140; /* XXX from eeprom ? */
+	battctx[BATT_2 - BATT_1].bc_stat = BATTS_NONE;
+	battctx[BATT_1 - BATT_1].bc_stat = BATTS_NONE;
 
 	oled_col = 20;
 	oled_line = 5;
@@ -2880,6 +2891,14 @@ again:
 				v = (double)_read_voltcur.batt_v[c] * 0.0488;
 				batt_v[2 - c] = (uint16_t)(v + 0.5);
 				// printf(" %4.4fV", v / 100);
+			}
+			if (battctx[0].bc_stat == BATT_NONE) {
+				if (batt_v[0] / 10 > BATT_MINV)
+					battctx[0].bc_stat = BATTS_CC;
+			}
+			if (battctx[1].bc_stat == BATT_NONE) {
+				if (batt_v[1] / 10 > BATT_MINV)
+					battctx[1].bc_stat = BATTS_CC;
 			}
 			// printf("\n");
 			pac_events.bits.bvalues_updated = 1;
