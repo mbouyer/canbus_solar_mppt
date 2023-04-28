@@ -206,7 +206,8 @@ static enum {
 	PWME_OVERTEMP,
 } pwm_error;
 
-#define TEMP_MAX (27315 + 7000) /* 70 deg celius */
+#define TEMP_MAX ((uint16_t)27315 + 7000) /* 70 deg celius */
+#define TEMP_RESTART ((uint16_t)TEMP_MAX - 1000) /* 10 deg below TEMP_MAX */
 
 uint16_t pwm_time;
 uint8_t pwme_time;
@@ -2639,8 +2640,8 @@ again:
 		if (time_events.bits.ev_10hz &&
 		    chrg_fsm == CHRG_DOWN && pwm_error != PWME_NOERROR) {
 			if (pwm_error == PWME_OVERTEMP) {
-				/* restart when below max - 10deg */
-				if (board_temp < (TEMP_MAX - 1000)) {
+				/* restart when below TEMP_RESTART */
+				if (board_temp < TEMP_RESTART) {
 					pwm_error = PWME_NOERROR;
 					chrg_events.bits.goon = 1;
 				}
