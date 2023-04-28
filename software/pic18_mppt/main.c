@@ -413,7 +413,10 @@ typedef struct {
 } batt_context_t;
 
 static batt_context_t battctx[2];
-#define active_battctx (battctx[active_batt - BATT_1])
+#define active_bidx (active_batt - BATT_1)
+#define active_battctx (battctx[active_bidx])
+#define active_battv (batt_v[active_bidx])
+#define active_batti (batt_i[active_bidx])
 
 #define BATT_MINV 80 /* if battery below 8V don't start chrg */
 
@@ -465,16 +468,17 @@ chrg_runfsm()
 			return;
 		}
 		if (pac_events.bits.pacavg_rdy_chrg) {
-			/* XXX battselect */
-			if ((batt_v[1] / 10) > active_battctx.bc_cv) {
+			if ((active_battv / 10) > active_battctx.bc_cv) {
 				/* if we're at target voltage go to CV mode */
 				chrg_volt_target_cnt = 0;
 				chrg_fsm = CHRG_CV;
 			} else {
 				char i;
-				/* XXX battselect */
+
 				/* battery current is inverted */
-				int16_t battcur = -_read_voltcur.batt_i[1];
+				/* direct match active_batt to _read_voltcu */
+				int16_t battcur =
+				    -_read_voltcur.batt_i[active_batt];
 				if (active_battctx.bc_r_chrg.chrgp_iout <
 				    battcur) {
 					active_battctx.bc_r_chrg.chrgp_iout =
@@ -509,9 +513,9 @@ chrg_runfsm()
 			chrg_fsm = CHRG_GODOWN;
 		}
 		if (pac_events.bits.pacavg_rdy_chrg) {
-			/* XXX battselect */
+			/* direct match active_batt to _read_voltcu */
 			chrg_current_accum +=
-			    (uint16_t)(-_read_voltcur.batt_i[1]);
+			    (uint16_t)(-_read_voltcur.batt_i[active_batt]);
 			chrg_accum_cnt--;
 			if (chrg_accum_cnt == 0) {
 #if 0
@@ -581,8 +585,7 @@ chrg_runfsm()
 		}
 		if (pac_events.bits.bvalues_updated) {
 			pac_events.bits.bvalues_updated = 0;
-			/* XXX battselect */
-			if ((batt_v[1] / 10) > active_battctx.bc_cv + 1) {
+			if ((active_battv / 10) > active_battctx.bc_cv + 1) {
 				chrg_volt_target_cnt++;
 				/*
 				 * if we're above target + 0.1 for more than
@@ -590,7 +593,7 @@ chrg_runfsm()
 				 * CV mode.
 				 */
 				if (chrg_volt_target_cnt > 100 || /* 1s */
-				    (batt_v[1] / 10) > active_battctx.bc_cv + 5) {
+				    (active_battv / 10) > active_battctx.bc_cv + 5) {
 					chrg_volt_target_cnt = 0;
 					chrg_fsm = CHRG_CV;
 				}
@@ -606,8 +609,7 @@ chrg_runfsm()
 		}
 		if (pac_events.bits.bvalues_updated) {
 			pac_events.bits.bvalues_updated = 0;
-			/* XXX battselect */
-			if ((batt_v[1] / 10) < active_battctx.bc_cv - 1) {
+			if ((active_battv / 10) < active_battctx.bc_cv - 1) {
 				chrg_volt_target_cnt++;
 				/*
 				 * if we're below target - 0.1 for more than
@@ -615,7 +617,7 @@ chrg_runfsm()
 				 * MPPT mode.
 				 */
 				if (chrg_volt_target_cnt > 100 || /* 1s */
-				    (batt_v[1] / 10) < active_battctx.bc_cv - 5) {
+				    (active_battv / 10) < active_battctx.bc_cv - 5) {
 					pwm_duty_c = 20; /* start at 10% */
 					pwm_set_duty();
 					active_battctx.bc_r_chrg.chrgp_iout = -1;
@@ -625,10 +627,9 @@ chrg_runfsm()
 				chrg_volt_target_cnt = 0;
 					
 			}
-			/* XXX battselect */
-			if (batt_v[1] / 10 > active_battctx.bc_cv) 
+			if (active_battv / 10 > active_battctx.bc_cv) 
 				pwm_duty_c--;
-			else if (batt_v[1] / 10 < active_battctx.bc_cv) 
+			else if (active_battv / 10 < active_battctx.bc_cv) 
 				pwm_duty_c++;
 			pwm_set_duty();
 		}
@@ -2565,7 +2566,7 @@ again:
 	chrg_fsm = CHRG_DOWN;
 	chrg_events.byte = 0;
 
-	active_batt = BATT_1; /* XXX battsel */
+	active_batt = BATT_1;
 	battctx[BATT_2 - BATT_1].bc_cv = 140; /* XXX from eeprom ? */
 	battctx[BATT_1 - BATT_1].bc_cv = 140; /* XXX from eeprom ? */
 	battctx[BATT_2 - BATT_1].bc_stat = BATTS_NONE;
