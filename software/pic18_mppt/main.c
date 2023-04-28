@@ -206,6 +206,7 @@ static enum {
 } pwm_error;
 
 uint16_t pwm_time;
+uint8_t pwme_time;
 
 uint8_t pwm_duty_c; /* duty cycle in % * 2 */
 #define PWM_DUTY_MAX 198
@@ -390,6 +391,7 @@ chrg_runfsm()
 	case CHRG_DOWN:
 		if (chrg_events.bits.goon) {
 			chrg_events.bits.goon = 0;
+			chrg_events.bits.gooff = 0;
 			pwm_events.bits.gooff = 0;
 			pwm_events.bits.goon = 1;
 			chrg_fsm = CHRG_PWMUP;
@@ -2623,6 +2625,15 @@ again:
 		chrg_runfsm();
 		pwm_runfsm();
 
+		if (time_events.bits.ev_10hz &&
+		    chrg_fsm == CHRG_DOWN && pwm_error != PWME_NOERROR) {
+			pwme_time++;
+			if (pwme_time >= 10) {
+				pwm_error = PWME_NOERROR;
+				chrg_events.bits.goon = 1;
+			}
+		}
+
 		PIE14bits.C2IE = 0;
 		if (softintrs.bits.int_btn_down) {
 			softintrs.bits.int_btn_down = 0;
@@ -2943,6 +2954,7 @@ irqh_ioc(void)
 	PIE0bits.IOCIE = 0;
 	pwm_events.bits.gooff = 1;
 	pwm_error = PWME_PWMOK;
+	pwme_time = 0;
 }
 
 void __interrupt(__irq(CM1), __low_priority, base(IVECT_BASE))
@@ -2952,6 +2964,7 @@ irqh_cm1(void)
 	PIE1bits.C1IE = 0;
 	pwm_events.bits.gooff = 1;
 	pwm_error = PWME_PWMV;
+	pwme_time = 0;
 }
 
 void __interrupt(__irq(CM2), __low_priority, base(IVECT_BASE))
