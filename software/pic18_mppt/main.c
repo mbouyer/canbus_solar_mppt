@@ -476,9 +476,8 @@ chrg_runfsm()
 				char i;
 
 				/* battery current is inverted */
-				/* direct match active_batt to _read_voltcu */
 				int16_t battcur =
-				    -_read_voltcur.batt_i[active_batt];
+				    -_read_voltcur.batt_i[2 - active_bidx];
 				if (active_battctx.bc_r_chrg.chrgp_iout <
 				    battcur) {
 					active_battctx.bc_r_chrg.chrgp_iout =
@@ -488,7 +487,7 @@ chrg_runfsm()
 				}
 				if (pwm_duty_c == PWM_DUTY_MAX) {
 					/* scan done */
-					printf("b %d end scan pwm %d curr %d\n",
+					printf("b %d end scan curr %d pwm %d\n",
 					    active_batt, 
 					    active_battctx.bc_r_chrg.chrgp_iout,
 					    active_battctx.bc_r_chrg.chrgp_pwm);
@@ -513,9 +512,8 @@ chrg_runfsm()
 			chrg_fsm = CHRG_GODOWN;
 		}
 		if (pac_events.bits.pacavg_rdy_chrg) {
-			/* direct match active_batt to _read_voltcu */
 			chrg_current_accum +=
-			    (uint16_t)(-_read_voltcur.batt_i[active_batt]);
+			    (uint16_t)(-_read_voltcur.batt_i[2 - active_bidx]);
 			chrg_accum_cnt--;
 			if (chrg_accum_cnt == 0) {
 #if 0
@@ -1837,11 +1835,11 @@ display_battstat_small()
 		oled_col = 20;
 		oled_line = 0;
 		battstat2buf_small(2);
-		/* batt1 (service) */
+		/* batt2 (service) */
 		oled_col = 20;
 		oled_line = 3;
 		battstat2buf_small(1);
-		/* batt2 (engine) */
+		/* batt1 (engine) */
 		oled_col = 20;
 		oled_line = 6;
 		battstat2buf_small(0);
@@ -1948,11 +1946,11 @@ display_battstat()
 		oled_col = 20;
 		oled_line = 0;
 		battstat2buf(2);
-		/* batt1 (service) */
+		/* batt2 (service) */
 		oled_col = 20;
 		oled_line = 3;
 		battstat2buf(1);
-		/* batt2 (engine) */
+		/* batt1 (engine) */
 		oled_col = 20;
 		oled_line = 6;
 		battstat2buf(0);
