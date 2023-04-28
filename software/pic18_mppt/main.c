@@ -73,19 +73,38 @@ u_int timer0_read(void);
 
 #define OLED_RSTN LATAbits.LATA4
 
-static void
-batt1_en(char on)
-{
-	CLCSELECT = 2;
-	CLCnPOLbits.G2POL = on;
-}
+typedef enum {
+	BATT_NONE = 0,
+	BATT_1 = 1,
+	BATT_2 = 2,
+} batt_t;
 
 static void
-batt2_en(char on)
+batt_en(batt_t b)
 {
-	CLCSELECT = 3;
-	CLCnPOLbits.G2POL = on;
+	switch(b) {
+	case BATT_NONE:
+		CLCSELECT = 2;
+		CLCnPOLbits.G2POL = 0;
+		CLCSELECT = 3;
+		CLCnPOLbits.G2POL = 0;
+		break;
+	case BATT_1:
+		CLCSELECT = 2;
+		CLCnPOLbits.G2POL = 1;
+		CLCSELECT = 3;
+		CLCnPOLbits.G2POL = 0;
+		break;
+	case BATT_2:
+		CLCSELECT = 2;
+		CLCnPOLbits.G2POL = 0;
+		CLCSELECT = 3;
+		CLCnPOLbits.G2POL = 1;
+		break;
+	}
 }
+
+static batt_t active_batt;
 
 static char counter_100hz;
 static char counter_100hz;
@@ -296,8 +315,7 @@ pwm_runfsm()
 			    PWM1S1P1,
 			    PORTB,
 			    PORTC);
-			batt1_en(0);
-			batt2_en(0);
+			batt_en(0);
 			pwm_time = timer0_read();
 			pwm_fsm = PWMF_BATTOFF;
 		}
@@ -372,7 +390,6 @@ static uint16_t chrg_previous_current;
 static uint16_t chrg_current_accum;
 static uint8_t chrg_accum_cnt;
 static int8_t chrg_duty_change;
-static uint8_t chrg_volt_target;
 static uint8_t chrg_volt_target_cnt;
 
 struct chrg_param {
@@ -380,11 +397,23 @@ struct chrg_param {
 	int16_t chrgp_iout; /* intensity output */
 };
 
-/* during rampup, keep the 5 best pwm values */
-#define CHRG_NBEST 5
-static struct chrg_param chrg_best[CHRG_NBEST];
+typedef enum {
+	BATTS_NONE = 0, /* uninitialised */
+	BATTS_CC, /* charge at max current */
+	BATTS_CV, /* charge at constant voltage */
+	BATTS_CV_FLOAT, /* charge at constant voltage */
+	BATTS_ERR, /* error state */
+} batt_state_t;
 
+typedef struct {
+	batt_state_t bc_stat;
+	uint16_t bc_cv; /* target voltage */
+	struct chrg_param bc_chrg; /* current chrg state */
+	struct chrg_param bc_r_chrg; /* best chrg state during rampup */
+} batt_context_t;
 
+static batt_context_t battctx[2];
+#define active_battctx (battctx[active_batt - BATT_1])
 
 static void
 chrg_runfsm()
@@ -406,9 +435,10 @@ chrg_runfsm()
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
 		} else if (pwm_fsm == PWMF_IDLE) {
-			batt2_en(1);
+			batt_en(active_batt);
 			pwm_duty_c = 20; /* start at 10% */
 			pwm_set_duty();
+			active_battctx.bc_r_chrg.chrgp_iout = -1;
 			pwm_fsm = PWMF_RUNNING;
 			printf("PWM RUN CON 0x%x PR 0x%x P1 0x%x B 0x%x C 0x%x\n", 
 			    PWM1CON,
@@ -416,9 +446,6 @@ chrg_runfsm()
 			    PWM1S1P1,
 			    PORTB,
 			    PORTC);
-			for (char i = 0; i < CHRG_NBEST; i++) {
-				chrg_best[i].chrgp_iout = -1;
-			}
 			chrg_fsm = CHRG_RAMPUP;
 
 		}
@@ -431,7 +458,7 @@ chrg_runfsm()
 		}
 		if (pac_events.bits.pacavg_rdy_chrg) {
 			/* XXX battselect */
-			if ((batt_v[1] / 10) > chrg_volt_target) {
+			if ((batt_v[1] / 10) > active_battctx.bc_cv) {
 				/* if we're at target voltage go to CV mode */
 				chrg_volt_target_cnt = 0;
 				chrg_fsm = CHRG_CV;
@@ -440,28 +467,20 @@ chrg_runfsm()
 				/* XXX battselect */
 				/* battery current is inverted */
 				int16_t battcur = -_read_voltcur.batt_i[1];
-				for (i = 0; i < CHRG_NBEST; i++) {
-					if (chrg_best[i].chrgp_iout < battcur)
-						break;
-				}
-				if (i < CHRG_NBEST) {
-					/* we have a better candidate */
-					for (char j = CHRG_NBEST; j > i; j--)
-						chrg_best[j] = chrg_best[j-1];
-					
-					chrg_best[i].chrgp_iout = battcur;
-					chrg_best[i].chrgp_pwm = pwm_duty_c;
+				if (active_battctx.bc_r_chrg.chrgp_iout <
+				    battcur) {
+					active_battctx.bc_r_chrg.chrgp_iout =
+					    battcur;
+					active_battctx.bc_r_chrg.chrgp_pwm =
+					    pwm_duty_c;
 				}
 				if (pwm_duty_c == PWM_DUTY_MAX) {
 					/* scan done */
-					printf("end scan ");
-					for (i = 0; i < CHRG_NBEST; i++) {
-						printf("pwm %d curr %d ",
-						    chrg_best[i].chrgp_pwm,
-						    chrg_best[i].chrgp_iout);
-					}
-					printf("\n");
-					pwm_duty_c = chrg_best[0].chrgp_pwm;
+					printf("b %d end scan pwm %d curr %d\n",
+					    active_batt, 
+					    active_battctx.bc_r_chrg.chrgp_iout,
+					    active_battctx.bc_r_chrg.chrgp_pwm);
+					pwm_duty_c = active_battctx.bc_r_chrg.chrgp_pwm;
 					pwm_set_duty();
 					chrg_current_accum = 0;
 					chrg_accum_cnt = 4;
@@ -555,7 +574,7 @@ chrg_runfsm()
 		if (pac_events.bits.bvalues_updated) {
 			pac_events.bits.bvalues_updated = 0;
 			/* XXX battselect */
-			if ((batt_v[1] / 10) > chrg_volt_target + 1) {
+			if ((batt_v[1] / 10) > active_battctx.bc_cv + 1) {
 				chrg_volt_target_cnt++;
 				/*
 				 * if we're above target + 0.1 for more than
@@ -563,7 +582,7 @@ chrg_runfsm()
 				 * CV mode.
 				 */
 				if (chrg_volt_target_cnt > 100 || /* 1s */
-				    (batt_v[1] / 10) > chrg_volt_target + 5) {
+				    (batt_v[1] / 10) > active_battctx.bc_cv + 5) {
 					chrg_volt_target_cnt = 0;
 					chrg_fsm = CHRG_CV;
 				}
@@ -580,7 +599,7 @@ chrg_runfsm()
 		if (pac_events.bits.bvalues_updated) {
 			pac_events.bits.bvalues_updated = 0;
 			/* XXX battselect */
-			if ((batt_v[1] / 10) < chrg_volt_target - 1) {
+			if ((batt_v[1] / 10) < active_battctx.bc_cv - 1) {
 				chrg_volt_target_cnt++;
 				/*
 				 * if we're below target - 0.1 for more than
@@ -588,19 +607,20 @@ chrg_runfsm()
 				 * MPPT mode.
 				 */
 				if (chrg_volt_target_cnt > 100 || /* 1s */
-				    (batt_v[1] / 10) < chrg_volt_target - 5) {
-					chrg_volt_target_cnt = 0;
-					chrg_duty_change = 8;
-					chrg_fsm = CHRG_MPPT;
+				    (batt_v[1] / 10) < active_battctx.bc_cv - 5) {
+					pwm_duty_c = 20; /* start at 10% */
+					pwm_set_duty();
+					active_battctx.bc_r_chrg.chrgp_iout = -1;
+					chrg_fsm = CHRG_RAMPUP;
 				}
 			} else {
 				chrg_volt_target_cnt = 0;
 					
 			}
 			/* XXX battselect */
-			if (batt_v[1] / 10 > chrg_volt_target) 
+			if (batt_v[1] / 10 > active_battctx.bc_cv) 
 				pwm_duty_c--;
-			else if (batt_v[1] / 10 < chrg_volt_target) 
+			else if (batt_v[1] / 10 < active_battctx.bc_cv) 
 				pwm_duty_c++;
 			pwm_set_duty();
 		}
@@ -2536,7 +2556,9 @@ again:
 
 	chrg_fsm = CHRG_DOWN;
 	chrg_events.byte = 0;
-	chrg_volt_target = 140; /* XXX from eeprom ? */
+
+	active_batt = BATT_2; /* XXX battsel */
+	active_battctx.bc_cv = 140; /* XXX from eeprom ? */
 
 	oled_col = 20;
 	oled_line = 5;
