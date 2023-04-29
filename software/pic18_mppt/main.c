@@ -2844,11 +2844,12 @@ again:
 					pwm_error = PWME_NOERROR;
 					chrg_events.bits.goon = 1;
 				}
-			} else if (pwm_error != PWME_BATTCUR) {
+			} else {
 				pwme_time++;
 				if (pwme_time >= 10) {
+					if (pwm_error != PWME_BATTCUR)
+						chrg_events.bits.goon = 1;
 					pwm_error = PWME_NOERROR;
-					chrg_events.bits.goon = 1;
 				}
 			}
 		}
@@ -2942,33 +2943,14 @@ again:
 		case BTN_DOWN_1:
 			oled_col = 60;
 			oled_line = 4;
-			sprintf(oled_displaybuf, "  B1 ");
-			displaybuf_small();
 			printf("B1\n");
-			if (pwm_error != PWME_NOERROR) {
-				printf("clear PWM error %d\n", pwm_error);
-				pwm_error = PWME_NOERROR;
-			} else if (pwm_fsm == PWMF_RUNNING) {
-				chrg_events.bits.battswitch = 1;
-			} else {
-				chrg_events.bits.goon = 1;
-			}
 			btn_state = BTN_DOWN_1_P;
 			break;
 		case BTN_DOWN_2:
-			oled_col = 60;
-			oled_line = 4;
-			sprintf(oled_displaybuf, "  B2 ");
-			displaybuf_small();
 			printf("B2\n");
-			chrg_events.bits.gooff = 1;
 			btn_state = BTN_DOWN_2_P;
 			break;
 		case BTN_UP:
-			oled_col = 60;
-			oled_line = 4;
-			sprintf(oled_displaybuf, "  up ");
-			displaybuf_small();
 			printf("up\n");
 			btn_state = BTN_IDLE;
 			break;
@@ -3099,6 +3081,16 @@ again:
 				}
 			} else {
 				negative_current_count = 0;
+			}
+			if (chrg_fsm == CHRG_DOWN && 
+			    pwm_error == PWME_NOERROR) {
+				/*
+				 * ready to start ? needs solar higher
+				 * than batteries by 1V
+				 */
+				if (batt_v[2] > batt_v[1] + 100 &&
+				    batt_v[2] > batt_v[0] + 100)
+					chrg_events.bits.goon = 1;
 			}
 		}
 		if (time_events.bits.ev_10hz) {
