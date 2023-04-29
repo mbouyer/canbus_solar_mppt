@@ -2875,7 +2875,7 @@ again:
 				}
 			} else {
 				pwme_time++;
-				if (pwme_time >= 10) {
+				if (pwme_time >= 20) {
 					if (pwm_error != PWME_BATTCUR)
 						chrg_events.bits.goon = 1;
 					pwm_error = PWME_NOERROR;
@@ -3093,14 +3093,14 @@ again:
 			if (batt_s_idx == 0)
 				batt_s_idx = BATT_S_NCOUNT;
 			// printf("\n");
-			if (battctx[0].bc_stat == BATT_NONE) {
-				if (batt_v[0] / 10 > BATT_MINV) {
+			if (pwm_error == PWME_NOERROR) {
+				if (battctx[0].bc_stat == BATT_NONE &&
+				    batt_v[0] / 10 > BATT_MINV) {
 					battctx[0].bc_stat = BATTS_CC;
 					battctx[0].bc_sw_time = timer0_read();
 				}
-			}
-			if (battctx[1].bc_stat == BATT_NONE) {
-				if (batt_v[1] / 10 > BATT_MINV) {
+				if (battctx[1].bc_stat == BATT_NONE &&
+				    batt_v[1] / 10 > BATT_MINV) {
 					battctx[1].bc_stat = BATTS_CC;
 					battctx[1].bc_sw_time = timer0_read();
 				}
@@ -3128,6 +3128,10 @@ again:
 				if (negative_current_count >= 5) {
 					pwm_error = PWME_BATTCUR;
 					pwm_events.bits.gooff = 1;
+					pwme_time = 0;
+					/* check batteries again */
+					battctx[0].bc_stat = BATTS_NONE;
+					battctx[1].bc_stat = BATTS_NONE;
 				}
 			} else {
 				negative_current_count = 0;
@@ -3136,11 +3140,18 @@ again:
 			    pwm_error == PWME_NOERROR) {
 				/*
 				 * ready to start ? needs solar higher
-				 * than batteries by 1V
+				 * than batteries by 1V, if batteries are
+				 * present
 				 */
-				if (batt_v[2] > batt_v[1] + 100 &&
-				    batt_v[2] > batt_v[0] + 100)
+				if (battctx[0].bc_stat != BATTS_NONE ||
+				    battctx[1].bc_stat != BATTS_NONE)
 					chrg_events.bits.goon = 1;
+				if (battctx[0].bc_stat != BATTS_NONE &&
+				    batt_v[2] < batt_v[0] + 100)
+					chrg_events.bits.goon = 0;
+				if (battctx[1].bc_stat != BATTS_NONE &&
+				    batt_v[2] < batt_v[1] + 100)
+					chrg_events.bits.goon = 0;
 			}
 		}
 		if (time_events.bits.ev_100hz) {
