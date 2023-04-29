@@ -562,9 +562,7 @@ chrg_runfsm()
 	case CHRG_RAMPUP:
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
-			return;
-		}
-		if (pac_events.bits.pacavg_rdy_chrg) {
+		} else if (pac_events.bits.pacavg_rdy_chrg) {
 			if ((active_battv / 10) > active_battctx.bc_cv) {
 				/* if we're at target voltage go to CV mode */
 				chrg_volt_target_cnt = 0;
@@ -606,9 +604,7 @@ chrg_runfsm()
 		break;
 			
 	case CHRG_MPPT:
-		if (chrg_events.bits.gooff) {
-			chrg_fsm = CHRG_GODOWN;
-		} else if (pac_events.bits.pacavg_rdy_chrg) {
+		if (pac_events.bits.pacavg_rdy_chrg) {
 			chrg_current_accum +=
 			    (uint16_t)(-_read_voltcur.batt_i[2 - active_bidx]);
 			chrg_accum_cnt--;
@@ -707,13 +703,15 @@ chrg_runfsm()
 			    chrg_previous_current / 4;
 			chrg_fsm = CHRG_BSWITCH;
 		}
+		if (chrg_events.bits.gooff) {
+			chrg_fsm = CHRG_GODOWN;
+		}
 		break;
 		
 	case CHRG_CV:
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
-		}
-		if (pac_events.bits.bvalues_updated) {
+		} else if (pac_events.bits.bvalues_updated) {
 			pac_events.bits.bvalues_updated = 0;
 			if ((active_battv / 10) < active_battctx.bc_cv - 1) {
 				chrg_volt_target_cnt++;
