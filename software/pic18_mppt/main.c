@@ -408,6 +408,7 @@ static uint16_t chrg_current_accum;
 static uint8_t chrg_accum_cnt;
 static int8_t chrg_duty_change;
 static uint8_t chrg_volt_target_cnt;
+static uint8_t chrg_batt_grace; /* grace cycles after batt switch in CV mode */
 
 struct chrg_param {
 	uint8_t chrgp_pwm; /* pwm value */
@@ -428,6 +429,7 @@ typedef struct {
 	chrg_fsm_t bc_chrg_fsm; /* chrg state to resume at */
 	struct chrg_param bc_chrg; /* current chrg state */
 	struct chrg_param bc_r_chrg; /* best chrg state during rampup */
+	u_int bc_sw_time; /* timer0() at last on switch */
 } batt_context_t;
 
 static batt_context_t battctx[2];
@@ -464,8 +466,55 @@ batt_switch_active()
 	return 0;
 }
 
-
-u_int chrg_time;
+static void
+schedule_batt_switch()
+{
+	/* check if a battery switch is needed:
+	 * compute weight  of each battery: if one * is cc and one is cv,
+	 * give 90/10% of time.
+	 * if both are in the same state, give 50/50%
+	 * One time slot is 1s, we compute the number of 1/10s allocated
+	 * to active battery.
+	 */
+	uint8_t bw[2], sum, c;
+	uint16_t time;
+	sum = 0;
+	for (c = 0; c < 2; c++) {
+		bw[c] = 0;
+		switch(battctx[c].bc_stat) {
+		case BATTS_CC:
+		case BATTS_CV:
+		case BATTS_CV_FLOAT:
+			switch(battctx[c].bc_chrg_fsm) {
+			case CHRG_MPPT:
+			case CHRG_RAMPUP:
+				bw[c] = 90;
+				break;
+			case CHRG_CV:
+				bw[c] = 10;
+				break;
+			default:
+				break;
+			}
+		default:
+			break;
+		}
+		sum += bw[c];
+	}
+	sum = sum / 10;
+	time = bw[active_bidx] / sum;
+	if (time < 10) {
+		time = time * TIMER0_100MS;
+		/* need a switch */
+		if (chrg_events.bits.battswitch) {
+			/* already pending, update currently running time */
+			active_battctx.bc_sw_time = timer0_read() -
+			    (TIMER0_100MS * 10);
+		} else if ((timer0_read() - active_battctx.bc_sw_time) > time) {
+			chrg_events.bits.battswitch = 1;
+		}
+	}
+}
 
 static void
 chrg_runfsm()
@@ -490,6 +539,7 @@ chrg_runfsm()
 			if (active_battctx.bc_stat != BATTS_NONE &&
 			    active_battctx.bc_stat != BATTS_ERR) {
 				batt_en(active_batt);
+				active_battctx.bc_sw_time = timer0_read();
 				pwm_duty_c = 20; /* start at 10% */
 				pwm_set_duty();
 				active_battctx.bc_r_chrg.chrgp_iout = -1;
@@ -519,6 +569,7 @@ chrg_runfsm()
 				/* if we're at target voltage go to CV mode */
 				chrg_volt_target_cnt = 0;
 				chrg_fsm = CHRG_CV;
+				chrg_batt_grace = 0;
 			} else {
 				char i;
 
@@ -557,8 +608,7 @@ chrg_runfsm()
 	case CHRG_MPPT:
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
-		}
-		if (pac_events.bits.pacavg_rdy_chrg) {
+		} else if (pac_events.bits.pacavg_rdy_chrg) {
 			chrg_current_accum +=
 			    (uint16_t)(-_read_voltcur.batt_i[2 - active_bidx]);
 			chrg_accum_cnt--;
@@ -641,6 +691,7 @@ chrg_runfsm()
 				    (active_battv / 10) > active_battctx.bc_cv + 5) {
 					chrg_volt_target_cnt = 0;
 					chrg_fsm = CHRG_CV;
+					chrg_batt_grace = 0;
 				}
 			} else {
 				chrg_volt_target_cnt = 0;
@@ -666,13 +717,16 @@ chrg_runfsm()
 			pac_events.bits.bvalues_updated = 0;
 			if ((active_battv / 10) < active_battctx.bc_cv - 1) {
 				chrg_volt_target_cnt++;
+				if (chrg_batt_grace)
+					chrg_batt_grace--;
 				/*
 				 * if we're below target - 0.1 for more than
 				 * 1s, or below target - 0.5, switch to
-				 * MPPT mode.
+				 * MPPT mode, but wait for grace counter
 				 */
-				if (chrg_volt_target_cnt > 100 || /* 1s */
-				    (active_battv / 10) < active_battctx.bc_cv - 5) {
+				if (chrg_batt_grace == 0 &&
+				    (chrg_volt_target_cnt > 10 || /* 0.1s */
+				    (active_battv / 10) < active_battctx.bc_cv - 5)) {
 					pwm_duty_c = 20; /* start at 10% */
 					pwm_set_duty();
 					active_battctx.bc_r_chrg.chrgp_iout = -1;
@@ -707,7 +761,7 @@ chrg_runfsm()
 			case PWMF_RUNNING:
 			case PWMF_IDLE:
 				pwm_fsm = PWMF_IDLE;
-				chrg_time = timer0_read();
+				active_battctx.bc_sw_time = timer0_read();
 				chrg_fsm = CHRG_BSWITCH_WAIT;
 				break;
 			default:
@@ -722,7 +776,8 @@ chrg_runfsm()
 	case CHRG_BSWITCH_WAIT:
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
-		} else if ((timer0_read() - chrg_time) > TIMER0_1MS) {
+		} else if ((timer0_read() - active_battctx.bc_sw_time) >
+		    TIMER0_1MS) {
 			batt_en(active_batt);
 			chrg_volt_target_cnt = 0;
 			chrg_current_accum = 0;
@@ -734,6 +789,11 @@ chrg_runfsm()
 			    (uint16_t)active_battctx.bc_chrg.chrgp_iout * 4;
 			pwm_set_duty();
 			pwm_fsm = PWMF_RUNNING;
+			/*
+			 * wait 4 read cycles before updating PWM
+			 * (we have minimum 10 read cycles before switching)
+			 */
+			chrg_batt_grace = 4;
 		}
 		break;
 	case CHRG_GODOWN:
@@ -3001,15 +3061,19 @@ again:
 				batt_v[2 - c] = (uint16_t)(v + 0.5);
 				// printf(" %4.4fV", v / 100);
 			}
+			// printf("\n");
 			if (battctx[0].bc_stat == BATT_NONE) {
-				if (batt_v[0] / 10 > BATT_MINV)
+				if (batt_v[0] / 10 > BATT_MINV) {
 					battctx[0].bc_stat = BATTS_CC;
+					battctx[0].bc_sw_time = timer0_read();
+				}
 			}
 			if (battctx[1].bc_stat == BATT_NONE) {
-				if (batt_v[1] / 10 > BATT_MINV)
+				if (batt_v[1] / 10 > BATT_MINV) {
 					battctx[1].bc_stat = BATTS_CC;
+					battctx[1].bc_sw_time = timer0_read();
+				}
 			}
-			// printf("\n");
 			pac_events.bits.bvalues_updated = 1;
 			if (pwm_fsm == PWMF_RUNNING) {
 				switch(active_batt) {
@@ -3037,6 +3101,9 @@ again:
 			} else {
 				negative_current_count = 0;
 			}
+		}
+		if (time_events.bits.ev_10hz) {
+			schedule_batt_switch();
 		}
 		pac_command_schedule();
 		while (i2c_return != I2C_INPROGRESS) {
