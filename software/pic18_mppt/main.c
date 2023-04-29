@@ -152,16 +152,6 @@ u_char pac_refresh_valid;
  * buffer to read voltage/current values at once 
  * as we're using readreg_be, the register order is inverted
  * Disabled channels are skipped, so only 3 entries
- */
-static struct {
-	int16_t batt_i[3];
-	uint16_t batt_v[3];
-} _read_voltcur;
-
-uint16_t batt_v[3];
-int16_t batt_i[3];
-
-/*
  * index:
  * _read_voltcur.batt_i[0] = SOLAR = batt_i[2]
  * _read_voltcur.batt_i[1] = BATT_2 = -batt_i[1]
@@ -171,6 +161,29 @@ int16_t batt_i[3];
  * _read_voltcur.batt_v[1] = BATT_2 = batt_v[1]
  * _read_voltcur.batt_v[2] = BATT_1 = batt_v[0]
  */
+static struct {
+	int16_t batt_i[3];
+	uint16_t batt_v[3];
+} _read_voltcur;
+
+/* computed amps and volt values */
+uint16_t batt_v[3];
+int16_t batt_i[3];
+
+/*
+ * Sliding average values for display.
+ * 100 values per second; we average 10 values and keep 11 averaged values
+ * (because we switch batteries once per second)
+ */
+uint16_t batt_v_a[3]; /* 3200 * 10 = 32000, it fits */
+int16_t  batt_i_a[3]; /* 1000 * 10 = 10000, it fits */
+uint8_t batt_a_count;
+#define BATT_A_NCOUNT 10
+
+#define BATT_S_NCOUNT 11
+uint8_t batt_s_idx;
+uint16_t batt_v_s[BATT_S_NCOUNT][3];
+int16_t  batt_i_s[BATT_S_NCOUNT][3];
 
 static uint32_t voltages_acc[3];
 pac_ctrl_t pac_ctrl;
@@ -1925,8 +1938,14 @@ uint8_t page_status;
 static void
 battstat2buf_small(u_char b)
 {
-	double amps = (double)batt_i[b] / 100;
-	double volts = (double)batt_v[b] / 100;
+	uint16_t _v = 0;
+	int16_t  _i = 0;
+	for (uint8_t c = 0; c < BATT_S_NCOUNT; c++) {
+		_v += batt_v_s[c][b];
+		_i += batt_i_s[c][b];
+	}
+	double amps = (double)_i / 100 / BATT_S_NCOUNT;
+	double volts = (double)_v / 100 / BATT_S_NCOUNT;
 	if (amps > 9.99 || amps < 0) {
 		if (volts < 10.0) {
 			sprintf(oled_displaybuf,
@@ -2051,8 +2070,14 @@ display_battstat_debug()
 static void
 battstat2buf(u_char b)
 {
-	double amps = (double)batt_i[b] / 100;
-	double volts = (double)batt_v[b] / 100;
+	uint16_t _v = 0;
+	int16_t  _i = 0;
+	for (uint8_t c = 0; c < BATT_S_NCOUNT; c++) {
+		_v += batt_v_s[c][b];
+		_i += batt_i_s[c][b];
+	}
+	double amps = (double)_i / 100 / BATT_S_NCOUNT;
+	double volts = (double)_v / 100 / BATT_S_NCOUNT;
 	if (amps > 9.99 || amps < 0) {
 		if (volts < 10.0) {
 			sprintf(oled_displaybuf,
@@ -2783,6 +2808,10 @@ again:
 	ADCON0bits.CSEN = 1;
 	ADCON0bits.GO = 1;
 
+	memset(batt_v_s, 0, sizeof(batt_v_s));
+	memset(batt_i_s, 0, sizeof(batt_v_s));
+	batt_s_idx = BATT_S_NCOUNT;
+	batt_a_count = BATT_A_NCOUNT;
 	printf("enter loop\n");
 
 	while (1) {
@@ -3024,24 +3053,45 @@ again:
 			double v;
 			pac_events.bits.pacavg_rdy = 0;
 			// printf("avg");
+			batt_a_count--;
+			if (batt_a_count == 0)
+				batt_s_idx--;
 			for (c = 0; c < 3; c++) {
+				uint8_t bi = 2  - c;
 				/* i = acc_value * 0.00075 */
 				/* batt_i = acc_value * 0.00075 * 100 */
 				v = (double)_read_voltcur.batt_i[c] * 0.075;
 				if (c != 0) {
 					/* batt1/batt2 are inverted */
-					batt_i[2 - c] = (int16_t)(-v + 0.5);
+					batt_i[bi] = (int16_t)(-v + 0.5);
 				} else {
-					batt_i[2] = (int16_t)(v + 0.5);
+					batt_i[bi] = (int16_t)(v + 0.5);
 				}
+				batt_i_a[bi] += batt_i[bi];
 
 				// printf(" %4.4fA", v / 100);
 				/* volt = vbus * 0.000488 */
 				/* batt_v = vbus * 0.000488 * 100 */      
 				v = (double)_read_voltcur.batt_v[c] * 0.0488;
-				batt_v[2 - c] = (uint16_t)(v + 0.5);
+				batt_v[bi] = (uint16_t)(v + 0.5);
 				// printf(" %4.4fV", v / 100);
+				batt_v_a[bi] += batt_v[bi];
+
+				if (batt_a_count == 0) {
+					int16_t  _i;
+					uint16_t _v;
+					_i = batt_i_a[bi] / BATT_A_NCOUNT;
+					batt_i_a[bi] = 0;
+					batt_i_s[batt_s_idx][bi] = _i;
+					_v = batt_v_a[bi] / BATT_A_NCOUNT;
+					batt_v_a[bi] = 0;
+					batt_v_s[batt_s_idx][bi] = _v;
+				}
 			}
+			if (batt_a_count == 0)
+				batt_a_count = BATT_A_NCOUNT;
+			if (batt_s_idx == 0)
+				batt_s_idx = BATT_S_NCOUNT;
 			// printf("\n");
 			if (battctx[0].bc_stat == BATT_NONE) {
 				if (batt_v[0] / 10 > BATT_MINV) {
