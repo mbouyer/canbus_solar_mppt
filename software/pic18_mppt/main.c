@@ -158,10 +158,21 @@ static struct {
 	uint16_t batt_v[3];
 } _read_voltcur;
 
-uint16_t batt_v[4];
-int16_t batt_i[4];
+uint16_t batt_v[3];
+int16_t batt_i[3];
 
-static uint32_t voltages_acc[4];
+/*
+ * index:
+ * _read_voltcur.batt_i[0] = SOLAR = batt_i[2]
+ * _read_voltcur.batt_i[1] = BATT_2 = -batt_i[1]
+ * _read_voltcur.batt_i[2] = BATT_1 = -batt_i[0]
+ *
+ * _read_voltcur.batt_v[0] = SOLAR = batt_v[2]
+ * _read_voltcur.batt_v[1] = BATT_2 = batt_v[1]
+ * _read_voltcur.batt_v[2] = BATT_1 = batt_v[0]
+ */
+
+static uint32_t voltages_acc[3];
 pac_ctrl_t pac_ctrl;
 
 static union pac_events {
@@ -223,6 +234,7 @@ static enum {
 	PWME_PWMV,
 	PWME_PWMOK,
 	PWME_OVERTEMP,
+	PWME_BATTCUR,
 } pwm_error;
 
 #define TEMP_MAX ((uint16_t)27315 + 7000) /* 70 deg celius */
@@ -742,6 +754,9 @@ static volatile i2c_return_t i2c_return;
 static int64_t l600_current_acc[4];
 static __uint24 l600_current_count;
 static uint32_t l600_voltages_acc[4];
+
+/* check negative current on battery */
+static uint8_t negative_current_count;
 
 /* PAC 195x state machine */
 
@@ -2993,6 +3008,32 @@ again:
 			}
 			// printf("\n");
 			pac_events.bits.bvalues_updated = 1;
+			if (pwm_fsm == PWMF_RUNNING) {
+				switch(active_batt) {
+				case BATT_1:
+					c = 2;
+					break;
+				case BATT_2:
+					c = 1;
+					break;
+				default:
+					c = 0; /* shouldn't happen */
+					break;
+				}
+				/* batt current is inverted */
+				if (_read_voltcur.batt_i[c] < 0)
+					negative_current_count = 0;
+				else {
+					negative_current_count++;
+					printf("battneg %d\n", negative_current_count);
+				}
+				if (negative_current_count >= 5) {
+					pwm_error = PWME_BATTCUR;
+					pwm_events.bits.gooff = 1;
+				}
+			} else {
+				negative_current_count = 0;
+			}
 		}
 		pac_command_schedule();
 		while (i2c_return != I2C_INPROGRESS) {
