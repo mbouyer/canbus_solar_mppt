@@ -560,46 +560,47 @@ chrg_runfsm()
 		break;
 
 	case CHRG_RAMPUP:
-		if (chrg_events.bits.gooff) {
-			chrg_fsm = CHRG_GODOWN;
-		} else if (pac_events.bits.pacavg_rdy_chrg) {
+		if (pac_events.bits.bvalues_updated) {
+			pac_events.bits.bvalues_updated = 0;
 			if ((active_battv / 10) > active_battctx.bc_cv) {
 				/* if we're at target voltage go to CV mode */
 				chrg_volt_target_cnt = 0;
 				chrg_fsm = CHRG_CV;
 				chrg_batt_grace = 0;
-			} else {
-				char i;
-
-				/* battery current is inverted */
-				int16_t battcur =
-				    -_read_voltcur.batt_i[2 - active_bidx];
-				if (active_battctx.bc_r_chrg.chrgp_iout <
-				    battcur) {
-					active_battctx.bc_r_chrg.chrgp_iout =
-					    battcur;
-					active_battctx.bc_r_chrg.chrgp_pwm =
-					    pwm_duty_c;
-				}
-				if (pwm_duty_c == PWM_DUTY_MAX) {
-					/* scan done */
-					printf("b %d end scan curr %d pwm %d\n",
-					    active_batt, 
-					    active_battctx.bc_r_chrg.chrgp_iout,
-					    active_battctx.bc_r_chrg.chrgp_pwm);
-					pwm_duty_c = active_battctx.bc_r_chrg.chrgp_pwm;
-					pwm_set_duty();
-					chrg_current_accum = 0;
-					chrg_accum_cnt = 4;
-					chrg_duty_change = 8;
-					chrg_fsm = CHRG_MPPT;
-				} else {
-					pwm_duty_c += 5;
-					if (pwm_duty_c > PWM_DUTY_MAX)
-						pwm_duty_c = PWM_DUTY_MAX;
-					pwm_set_duty();
-				}
 			}
+		}
+		if (pac_events.bits.pacavg_rdy_chrg &&
+		    chrg_fsm == CHRG_RAMPUP) {
+			char i;
+
+			/* battery current is inverted */
+			int16_t battcur =
+			    -_read_voltcur.batt_i[2 - active_bidx];
+			if (active_battctx.bc_r_chrg.chrgp_iout < battcur) {
+				active_battctx.bc_r_chrg.chrgp_iout = battcur;
+				active_battctx.bc_r_chrg.chrgp_pwm = pwm_duty_c;
+			}
+			if (pwm_duty_c == PWM_DUTY_MAX) {
+				/* scan done */
+				printf("b %d end scan curr %d pwm %d\n",
+				    active_batt, 
+				    active_battctx.bc_r_chrg.chrgp_iout,
+				    active_battctx.bc_r_chrg.chrgp_pwm);
+				pwm_duty_c = active_battctx.bc_r_chrg.chrgp_pwm;
+				pwm_set_duty();
+				chrg_current_accum = 0;
+				chrg_accum_cnt = 4;
+				chrg_duty_change = 8;
+				chrg_fsm = CHRG_MPPT;
+			} else {
+				pwm_duty_c += 5;
+				if (pwm_duty_c > PWM_DUTY_MAX)
+					pwm_duty_c = PWM_DUTY_MAX;
+				pwm_set_duty();
+			}
+		}
+		if (chrg_events.bits.gooff) {
+			chrg_fsm = CHRG_GODOWN;
 		}
 		break;
 			
@@ -2843,7 +2844,7 @@ again:
 					pwm_error = PWME_NOERROR;
 					chrg_events.bits.goon = 1;
 				}
-			} else {
+			} else if (pwm_error != PWME_BATTCUR) {
 				pwme_time++;
 				if (pwme_time >= 10) {
 					pwm_error = PWME_NOERROR;
