@@ -714,6 +714,9 @@ chrg_runfsm()
 				chrg_fsm = CHRG_GODOWN;
 				break;
 			}
+		} else {
+			/* back to previous state */
+			chrg_fsm = active_battctx.bc_chrg_fsm;
 		}
 		break;
 	case CHRG_BSWITCH_WAIT:
