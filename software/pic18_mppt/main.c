@@ -523,6 +523,7 @@ chrg_runfsm()
 		chrg_events.bits.gooff = 1;
 	switch(chrg_fsm) {
 	case CHRG_DOWN:
+		chrg_events.bits.battswitch = 0;
 		if (chrg_events.bits.goon) {
 			chrg_events.bits.goon = 0;
 			chrg_events.bits.gooff = 0;
@@ -697,7 +698,6 @@ chrg_runfsm()
 		if (chrg_events.bits.battswitch &&
 		    chrg_current_accum == 0 && chrg_volt_target_cnt == 0 &&
 		    chrg_fsm == CHRG_MPPT) {
-			chrg_events.bits.battswitch = 0;
 			active_battctx.bc_chrg_fsm = chrg_fsm;
 			active_battctx.bc_chrg.chrgp_pwm = pwm_duty_c;
 			active_battctx.bc_chrg.chrgp_iout =
@@ -735,7 +735,6 @@ chrg_runfsm()
 			} else {
 				chrg_volt_target_cnt = 0;
 				if (chrg_events.bits.battswitch) {
-					chrg_events.bits.battswitch = 0;
 					active_battctx.bc_chrg_fsm = chrg_fsm;
 					active_battctx.bc_chrg.chrgp_pwm = pwm_duty_c;
 					chrg_fsm = CHRG_BSWITCH;
@@ -750,6 +749,7 @@ chrg_runfsm()
 		break;
 
 	case CHRG_BSWITCH:
+		chrg_events.bits.battswitch = 0;
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
 		} else if (batt_switch_active()) {
@@ -3093,7 +3093,7 @@ again:
 					chrg_events.bits.goon = 1;
 			}
 		}
-		if (time_events.bits.ev_10hz) {
+		if (time_events.bits.ev_100hz) {
 			schedule_batt_switch();
 		}
 		pac_command_schedule();
