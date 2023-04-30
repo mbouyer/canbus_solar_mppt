@@ -638,7 +638,7 @@ chrg_mppt_compute()
 	chrg_accum_cnt = 4;
 	chrg_current_accum = 0;
 
-	if (active_battctx.bc_rp_time >= MPPT_RAMPUP_PERIOD - 2) {
+	if (active_battctx.bc_rp_time >= MPPT_RAMPUP_PERIOD - 4) {
 		/* record values after they have stabilized */
 		active_battctx.bc_r_chrg.chrgp_pwm = pwm_duty_c;
 		active_battctx.bc_r_chrg.chrgp_iout =
@@ -660,7 +660,10 @@ chrg_mppt_compute()
 		    (active_battctx.bc_r_chrg.chrgp_iout + _read_voltcur.batt_i[2 - active_bidx]);
 		cdiff = cdiff * 100 / active_battctx.bc_r_chrg.chrgp_iout;
 		if (abs((int)cdiff) > 10) { /* 10% move */
-			printf("reramp I %d (%x %x)\n", (int)cdiff, active_battctx.bc_r_chrg.chrgp_iout, -_read_voltcur.batt_i[2 - active_bidx]);
+			printf("reramp I %d (%x %x)\n",
+			    (int)cdiff,
+			    active_battctx.bc_r_chrg.chrgp_iout,
+			    -_read_voltcur.batt_i[2 - active_bidx]);
 			chrg_fsm = CHRG_RAMPUP;
 		}
 
