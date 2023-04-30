@@ -1985,7 +1985,15 @@ battstat2buf_small(u_char b)
 	}
 	double amps = (double)_i / 100 / BATT_S_NCOUNT;
 	double volts = (double)_v / 100 / BATT_S_NCOUNT;
-	if (amps > 9.99 || amps < 0) {
+	if (b < 2 && !check_batt_active(b)) {
+		if (volts < 10.0) {
+			sprintf(oled_displaybuf,
+			    " %1.01fV\n     ", volts);
+		} else {
+			sprintf(oled_displaybuf,
+			    "%2.01fV\n     ", volts);
+		}
+	} else if (amps > 9.99 || amps < 0) {
 		if (volts < 10.0) {
 			sprintf(oled_displaybuf,
 			    " %1.01fV\n-.--A", volts);
@@ -2132,7 +2140,15 @@ battstat2buf(u_char b)
 	}
 	double amps = (double)_i / 100 / BATT_S_NCOUNT;
 	double volts = (double)_v / 100 / BATT_S_NCOUNT;
-	if (amps > 9.99 || amps < 0) {
+	if (b < 2 && !check_batt_active(b)) {
+		if (volts < 10.0) {
+			sprintf(oled_displaybuf,
+			    " %1.01f     ", volts);
+		} else {
+			sprintf(oled_displaybuf,
+			    "%2.01f     ", volts);
+		}
+	} else if (amps > 9.99 || amps < 0) {
 		if (volts < 10.0) {
 			sprintf(oled_displaybuf,
 			    " %1.01f -.--", volts);
