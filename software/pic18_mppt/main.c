@@ -3061,7 +3061,12 @@ again:
 				ADCTX = 1;
 				ad_pwm = ADRES;
 				ADCTX = 2;
-				ad_temp = ADRES;
+				if (ADRES == 0 || ADRES == 0xfff)
+					ad_temp = 0xffff;
+				else if (ad_temp == 0 || ad_temp == 0xffff)
+					ad_temp = ADRES;
+				else
+					ad_temp = (ad_temp + ADRES) / 2;
 				break;
 			}
 			softintrs.bits.int_adcc = 0;
