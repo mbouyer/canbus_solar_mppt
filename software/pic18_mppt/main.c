@@ -465,11 +465,12 @@ static void
 check_batt_status()
 {
 	for (char c = 0; c < 2; c++) {
-		if (batt_v[c] / 10 <= BATT_MINV) {
+		uint8_t _v = (uint8_t)(batt_v[c] / 10);
+		if (_v <= BATT_MINV) {
 			battctx[c].bc_stat = BATTS_NONE;
 			continue;
 		}
-		if (batt_v[c] / 10 > bparams[c].bp_stby_voltage) {
+		if (_v > bparams[c].bp_stby_voltage) {
 			if (battctx[c].bc_stat == BATTS_NONE)
 				battctx[c].bc_stat = BATTS_STANDBY;
 		} else {
@@ -762,12 +763,13 @@ chrg_runfsm()
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
 		} else if (pac_events.bits.bvalues_updated) {
+			uint8_t _v = (uint8_t)(active_battv / 10);
 			pac_events.bits.bvalues_updated = 0;
 			/* wait for grace period before checking for mode sw */
 			if (chrg_batt_grace)
 				chrg_batt_grace--;
 			if (chrg_batt_grace == 0 &&
-			    (active_battv / 10) < active_battctx.bc_cv - 1) {
+			    _v < active_battctx.bc_cv - 1) {
 				chrg_volt_target_cnt++;
 				/*
 				 * if we're below target - 0.1 for more than
@@ -775,7 +777,7 @@ chrg_runfsm()
 				 * MPPT mode
 				 */
 				if (chrg_volt_target_cnt > 10 || /* 0.1s */
-				    (active_battv / 10) < active_battctx.bc_cv - 5) {
+				    _v < active_battctx.bc_cv - 5) {
 					pwm_duty_c = 20; /* start at 10% */
 					pwm_set_duty();
 					active_battctx.bc_r_chrg.chrgp_iout = -1;
@@ -790,9 +792,9 @@ chrg_runfsm()
 					chrg_fsm = CHRG_BSWITCH;
 				}
 			}
-			if (active_battv / 10 > active_battctx.bc_cv) 
+			if (_v > active_battctx.bc_cv) 
 				pwm_duty_c--;
-			else if (active_battv / 10 < active_battctx.bc_cv) 
+			else if (_v < active_battctx.bc_cv) 
 				pwm_duty_c++;
 			pwm_set_duty();
 		}
