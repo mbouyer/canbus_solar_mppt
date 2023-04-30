@@ -1983,32 +1983,20 @@ battstat2buf_small(u_char b)
 		_v += batt_v_s[c][b];
 		_i += batt_i_s[c][b];
 	}
+
+	/*can't use double for voltage because %2.1f doens't work as expected*/
+	_v = _v / BATT_S_NCOUNT;
 	double amps = (double)_i / 100 / BATT_S_NCOUNT;
-	double volts = (double)_v / 100 / BATT_S_NCOUNT;
+
 	if (b < 2 && !check_batt_active(b)) {
-		if (volts < 10.0) {
-			sprintf(oled_displaybuf,
-			    " %1.01fV\n     ", volts);
-		} else {
-			sprintf(oled_displaybuf,
-			    "%2.01fV\n     ", volts);
-		}
+		sprintf(oled_displaybuf,
+		    "%2d.%1dV\n     ", _v / 100, (_v % 100) / 10);
 	} else if (amps > 9.99 || amps < 0) {
-		if (volts < 10.0) {
-			sprintf(oled_displaybuf,
-			    " %1.01fV\n-.--A", volts);
-		} else {
-			sprintf(oled_displaybuf,
-			    "%2.01fV\n-.--A", volts);
-		}
+		sprintf(oled_displaybuf,
+		    "%2d.%1dV\n-.--A", _v / 100, (_v % 100) / 10);
 	} else {
-		if (volts < 10.0) {
-			sprintf(oled_displaybuf,
-			    " %1.01fV\n%1.02fA", volts, amps);
-		} else {
-			sprintf(oled_displaybuf,
-			    "%2.01fV\n%1.02fA", volts, amps);
-		}
+		sprintf(oled_displaybuf,
+		    "%2d.%1dV\n%1.02fA", _v / 100, (_v % 100) / 10, amps);
 	}
 	displaybuf_small();
 }
@@ -2154,7 +2142,7 @@ display_battstat_details()
 		displaybuf_small();
 		oled_col = 60;
 		oled_line = 1;
-		sprintf(oled_displaybuf, "%2.2f%c", (float)board_temp / 100.0 - 273.15, 20);
+		sprintf(oled_displaybuf, "%2.1f%c", (float)board_temp / 100.0 - 273.15, 20);
 		displaybuf_small();
 	}
 	/*
@@ -2198,32 +2186,19 @@ battstat2buf(u_char b)
 		_v += batt_v_s[c][b];
 		_i += batt_i_s[c][b];
 	}
+	/*can't use double for voltage because %2.1f doens't work as expected*/
+	_v = _v / BATT_S_NCOUNT;
 	double amps = (double)_i / 100 / BATT_S_NCOUNT;
-	double volts = (double)_v / 100 / BATT_S_NCOUNT;
+
 	if (b < 2 && !check_batt_active(b)) {
-		if (volts < 10.0) {
-			sprintf(oled_displaybuf,
-			    " %1.01f     ", volts);
-		} else {
-			sprintf(oled_displaybuf,
-			    "%2.01f     ", volts);
-		}
+		sprintf(oled_displaybuf,
+		    "%2d.%1d     ", _v / 100, (_v % 100) / 10);
 	} else if (amps > 9.99 || amps < 0) {
-		if (volts < 10.0) {
-			sprintf(oled_displaybuf,
-			    " %1.01f -.--", volts);
-		} else {
-			sprintf(oled_displaybuf,
-			    "%2.01f -.--", volts);
-		}
+		sprintf(oled_displaybuf,
+		    "%2d.%1d -.--", _v / 100, (_v % 100) / 10);
 	} else {
-		if (volts < 10.0) {
-			sprintf(oled_displaybuf,
-			    " %1.01f %1.02f", volts, amps);
-		} else {
-			sprintf(oled_displaybuf,
-			    "%2.01f %1.02f", volts, amps);
-		}
+		sprintf(oled_displaybuf,
+		    "%2d.%1d %1.02f", _v / 100, (_v % 100) / 10, amps);
 	}
 	displaybuf_medium();
 }
