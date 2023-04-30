@@ -451,7 +451,10 @@ typedef struct {
 	struct chrg_param bc_chrg; /* current chrg state */
 	struct chrg_param bc_r_chrg; /* best chrg state during rampup */
 	u_int bc_sw_time; /* timer0() at last on switch */
+	u_int bc_rp_time; /* number of seconds in MPPT state */
 } batt_context_t;
+
+#define MPPT_RAMPUP_PERIOD 600 /* redo a ramup every 10mn */
 
 static batt_context_t battctx[2];
 #define active_bidx (active_batt - BATT_1)
@@ -566,6 +569,110 @@ schedule_batt_switch()
 	}
 }
 
+uint8_t _mppt_debug;
+
+static void
+chrg_mppt_compute()
+{
+#if 0
+	char c;
+	c = (chrg_current_accum >> 12) & 0x0f;
+	if (c > 9)
+		usart_putchar('A' - 10 + c);
+	else
+		usart_putchar('0' + c);
+	c = (chrg_current_accum >> 8) & 0x0f;
+	if (c > 9)
+		usart_putchar('A' - 10 + c);
+	else
+		usart_putchar('0' + c);
+	c = (chrg_current_accum >> 4) & 0x0f;
+	if (c > 9)
+		usart_putchar('A' - 10 + c);
+	else
+		usart_putchar('0' + c);
+	c = (chrg_current_accum >> 0) & 0x0f;
+	if (c > 9)
+		usart_putchar('A' - 10 + c);
+	else
+		usart_putchar('0' + c);
+	usart_putchar('_');
+	c = (pwm_duty_c >> 4) & 0x0f;
+	if (c > 9)
+		usart_putchar('A' - 10 + c);
+	else
+		usart_putchar('0' + c);
+	c = (pwm_duty_c >> 0) & 0x0f;
+	if (c > 9)
+		usart_putchar('A' - 10 + c);
+	else
+		usart_putchar('0' + c);
+	usart_putchar(' ');
+#endif
+	if (chrg_previous_current > chrg_current_accum){
+		/* wrong move */
+		if (chrg_duty_change < 0)
+			chrg_duty_change = 8;
+		else
+			chrg_duty_change = -8;
+	} else {
+		/*
+		 * right move; try a bit faster
+		 *  but only every 8 update cycle
+		 * in the right direction
+		 */
+		if (chrg_duty_change < 0) {
+			chrg_duty_change += -1;
+			if (chrg_duty_change < -64)
+				chrg_duty_change = -64;
+		} else {
+			chrg_duty_change += 1;
+			if (chrg_duty_change > 64)
+				chrg_duty_change = 64;
+		}
+	}
+
+	chrg_previous_current = chrg_current_accum;
+	pwm_duty_c += (chrg_duty_change >> 3);
+	pwm_set_duty();
+	chrg_accum_cnt = 4;
+	chrg_current_accum = 0;
+
+	if (active_battctx.bc_rp_time >= MPPT_RAMPUP_PERIOD - 2) {
+		/* record values after they have stabilized */
+		active_battctx.bc_r_chrg.chrgp_pwm = pwm_duty_c;
+		active_battctx.bc_r_chrg.chrgp_iout =
+		    -_read_voltcur.batt_i[2 - active_bidx];
+	} else {
+		/* check if we need to re-do a rampup */
+		if (active_battctx.bc_rp_time == 0) {
+			printf("reramp time\n");
+			chrg_fsm = CHRG_RAMPUP;
+		}
+		int16_t dtdiff =
+		    ((int16_t)pwm_duty_c - active_battctx.bc_r_chrg.chrgp_pwm);
+		if (abs(dtdiff) > 20) { /* 10% move */
+			printf("reramp duty %d\n", dtdiff);
+			chrg_fsm = CHRG_RAMPUP;
+		}
+		/* cdiff = active_battctx.bc_r_chrg.chrgp_iout - battcur */
+		int32_t cdiff =
+		    (active_battctx.bc_r_chrg.chrgp_iout + _read_voltcur.batt_i[2 - active_bidx]);
+		cdiff = cdiff * 100 / active_battctx.bc_r_chrg.chrgp_iout;
+		if (abs((int)cdiff) > 10) { /* 10% move */
+			printf("reramp I %d (%x %x)\n", (int)cdiff, active_battctx.bc_r_chrg.chrgp_iout, -_read_voltcur.batt_i[2 - active_bidx]);
+			chrg_fsm = CHRG_RAMPUP;
+		}
+
+		if ((_mppt_debug++ % 128) == 0) {
+			printf("bc_r_i %x curr %x df %d\n",
+			    active_battctx.bc_r_chrg.chrgp_iout,
+			    -_read_voltcur.batt_i[2 - active_bidx],
+			    (int)cdiff);
+		}
+	}
+}
+
 static void
 chrg_runfsm()
 {
@@ -642,6 +749,7 @@ chrg_runfsm()
 				chrg_current_accum = 0;
 				chrg_accum_cnt = 4;
 				chrg_duty_change = 8;
+				active_battctx.bc_rp_time = MPPT_RAMPUP_PERIOD;
 				chrg_fsm = CHRG_MPPT;
 			} else {
 				pwm_duty_c += 5;
@@ -661,69 +769,7 @@ chrg_runfsm()
 			    (uint16_t)(-_read_voltcur.batt_i[2 - active_bidx]);
 			chrg_accum_cnt--;
 			if (chrg_accum_cnt == 0) {
-#if 0
-				char c;
-				c = (chrg_current_accum >> 12) & 0x0f;
-				if (c > 9)
-					usart_putchar('A' - 10 + c);
-				else
-					usart_putchar('0' + c);
-				c = (chrg_current_accum >> 8) & 0x0f;
-				if (c > 9)
-					usart_putchar('A' - 10 + c);
-				else
-					usart_putchar('0' + c);
-				c = (chrg_current_accum >> 4) & 0x0f;
-				if (c > 9)
-					usart_putchar('A' - 10 + c);
-				else
-					usart_putchar('0' + c);
-				c = (chrg_current_accum >> 0) & 0x0f;
-				if (c > 9)
-					usart_putchar('A' - 10 + c);
-				else
-					usart_putchar('0' + c);
-				usart_putchar('_');
-				c = (pwm_duty_c >> 4) & 0x0f;
-				if (c > 9)
-					usart_putchar('A' - 10 + c);
-				else
-					usart_putchar('0' + c);
-				c = (pwm_duty_c >> 0) & 0x0f;
-				if (c > 9)
-					usart_putchar('A' - 10 + c);
-				else
-					usart_putchar('0' + c);
-				usart_putchar(' ');
-#endif
-				if (chrg_previous_current > chrg_current_accum){
-					/* wrong move */
-					if (chrg_duty_change < 0)
-						chrg_duty_change = 8;
-					else
-						chrg_duty_change = -8;
-				} else {
-					/*
-					 * right move; try a bit faster
-					 *  but only every 8 update cycle
-					 * in the right direction
-					 */
-					if (chrg_duty_change < 0) {
-						chrg_duty_change += -1;
-						if (chrg_duty_change < -64)
-							chrg_duty_change = -64;
-					} else {
-						chrg_duty_change += 1;
-						if (chrg_duty_change > 64)
-							chrg_duty_change = 64;
-					}
-				}
-
-				chrg_previous_current = chrg_current_accum;
-				pwm_duty_c += (chrg_duty_change >> 3);
-				pwm_set_duty();
-				chrg_accum_cnt = 4;
-				chrg_current_accum = 0;
+				chrg_mppt_compute();
 			}
 		}
 		if (pac_events.bits.bvalues_updated) {
@@ -2875,8 +2921,9 @@ again:
 	bparams[BATT_2 - BATT_1].bp_float_voltage = 135;
 
 	active_batt = BATT_1;
-	battctx[BATT_2 - BATT_1].bc_stat = BATTS_NONE;
-	battctx[BATT_1 - BATT_1].bc_stat = BATTS_NONE;
+	for (c = 0; c < 2; c++) {
+		battctx[c].bc_stat = BATTS_NONE;
+	}
 
 	oled_col = 20;
 	oled_line = 5;
@@ -2975,6 +3022,10 @@ again:
 			    chrg_fsm != CHRG_DOWN) {
 				pwm_error = PWME_OVERTEMP;
 				pwm_events.bits.gooff = 1;
+			}
+			for (c = 0; c < 2; c++) {
+				if (battctx[c].bc_rp_time != 0)
+					battctx[c].bc_rp_time--;
 			}
 		}
 
