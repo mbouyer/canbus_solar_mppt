@@ -2128,6 +2128,66 @@ display_battstat_debug()
 	displaybuf_small();
 }
 
+static void
+display_battstat_details()
+{
+	display_battstat_small();
+	if (page_status != 0) {
+		if (page_status == 5) {
+			page_status = 0;
+		}
+		return;
+	}
+	/*
+	 * once per second display CAN status and temperature 
+	 * choose a counter_10hz value that doesn't conflict with
+	 * display_battstat_small();
+	 */
+	if (counter_10hz == 2) {
+		oled_col = 60;
+		oled_line = 0;
+		if (nmea2000_status == NMEA2000_S_OK) {
+			sprintf(oled_displaybuf, "a %3d", nmea2000_addr);
+		} else {
+			sprintf(oled_displaybuf, "a ---");
+		}
+		displaybuf_small();
+		oled_col = 60;
+		oled_line = 1;
+		sprintf(oled_displaybuf, "%2.2f%c", (float)board_temp / 100.0 - 273.15, 20);
+		displaybuf_small();
+	}
+	/*
+	 * once per second display battery status
+	 * choose a counter_10hz value that doesn't conflict with
+	 * display_battstat_small();
+	 */
+	if (counter_10hz == 4) {
+		for (uint8_t c = 0; c < 2; c++) {
+			oled_col = 54;
+			oled_line = (c == 0) ? 7 : 4;
+			switch(battctx[c].bc_stat) {
+			case BATTS_NONE:
+				sprintf(oled_displaybuf, "none   ");
+				break;
+			case BATTS_BULK:
+				sprintf(oled_displaybuf, "bulk   ");
+				break;
+			case BATTS_FLOAT:
+				sprintf(oled_displaybuf, "float  ");
+				break;
+			case BATTS_STANDBY:
+				sprintf(oled_displaybuf, "standby");
+				break;
+			case BATTS_ERR:
+				sprintf(oled_displaybuf, "error  ");
+				break;
+			}
+			displaybuf_small();
+		}
+	}
+}
+
 
 static void
 battstat2buf(u_char b)
@@ -2219,6 +2279,7 @@ display_battstat()
 
 typedef enum {
 	PAGE_BATTSTAT,
+	PAGE_BATTSTAT_DETAILS,
 	PAGE_BATTSTAT_DEBUG,
 } page_t;
 
@@ -2230,6 +2291,9 @@ display_page()
 	switch(active_page) {
 	case PAGE_BATTSTAT:
 		display_battstat();
+		break;
+	case PAGE_BATTSTAT_DETAILS:
+		display_battstat_details();
 		break;
 	case PAGE_BATTSTAT_DEBUG:
 		display_battstat_debug();
@@ -2243,6 +2307,9 @@ next_page()
 	page_status = 1;
 	switch(active_page) {
 	case PAGE_BATTSTAT:
+		active_page = PAGE_BATTSTAT_DETAILS;
+		break;
+	case PAGE_BATTSTAT_DETAILS:
 		active_page = PAGE_BATTSTAT_DEBUG;
 		break;
 	case PAGE_BATTSTAT_DEBUG:
