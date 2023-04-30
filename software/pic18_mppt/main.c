@@ -430,11 +430,19 @@ struct chrg_param {
 
 typedef enum {
 	BATTS_NONE = 0, /* uninitialised */
-	BATTS_CC, /* charge at max current */
-	BATTS_CV, /* charge at constant voltage */
-	BATTS_CV_FLOAT, /* charge at constant voltage */
+	BATTS_BULK, /* charge at max current or bulk voltage */
+	BATTS_FLOAT, /* charge at float voltage */
+	BATTS_STANDBY, /* do not charge */
 	BATTS_ERR, /* error state */
 } batt_state_t;
+
+typedef struct {
+	uint16_t bp_stby_voltage;
+	uint16_t bp_bulk_voltage; 
+	uint16_t bp_float_voltage;
+} batt_params_t;
+
+static batt_params_t bparams[2];
 
 typedef struct {
 	batt_state_t bc_stat;
@@ -453,21 +461,52 @@ static batt_context_t battctx[2];
 
 #define BATT_MINV 80 /* if battery below 8V don't start chrg */
 
+static void
+check_batt_status()
+{
+	for (char c = 0; c < 2; c++) {
+		if (batt_v[c] / 10 <= BATT_MINV) {
+			battctx[c].bc_stat = BATTS_NONE;
+			continue;
+		}
+		if (batt_v[c] / 10 > bparams[c].bp_stby_voltage) {
+			if (battctx[c].bc_stat == BATTS_NONE)
+				battctx[c].bc_stat = BATTS_STANDBY;
+		} else {
+			if (battctx[c].bc_stat == BATTS_NONE ||
+			    battctx[c].bc_stat == BATTS_STANDBY) {
+				battctx[c].bc_stat = BATTS_BULK;
+				battctx[c].bc_cv = bparams[c].bp_bulk_voltage;
+				battctx[c].bc_sw_time = timer0_read();
+				battctx[c].bc_chrg_fsm = CHRG_RAMPUP;
+			}
+		}
+	}
+}
+
+static char
+check_batt_active(char b)
+{
+	if (battctx[b].bc_stat == BATTS_BULK ||
+	    battctx[b].bc_stat == BATTS_FLOAT)
+		return 1;
+	else
+		return 0;
+}
+
 static char
 batt_switch_active()
 {
 	switch(active_batt) {
 	case BATT_1:
-		if (battctx[BATT_2 - BATT_1].bc_stat != BATTS_NONE &&
-		    battctx[BATT_2 - BATT_1].bc_stat != BATTS_ERR) {
+		if (check_batt_active(BATT_2 - BATT_1)) {
 			printf("bact 1 2\n");
 			active_batt = BATT_2;
 			return 1;
 		}
 		break;
 	case BATT_2:
-		if (battctx[BATT_1 - BATT_1].bc_stat != BATTS_NONE &&
-		    battctx[BATT_1 - BATT_1].bc_stat != BATTS_ERR) {
+		if (check_batt_active(BATT_1 - BATT_1)) {
 			active_batt = BATT_1;
 			printf("bact 2 1\n");
 			return 1;
@@ -495,9 +534,8 @@ schedule_batt_switch()
 	for (c = 0; c < 2; c++) {
 		bw[c] = 0;
 		switch(battctx[c].bc_stat) {
-		case BATTS_CC:
-		case BATTS_CV:
-		case BATTS_CV_FLOAT:
+		case BATTS_BULK:
+		case BATTS_FLOAT:
 			switch(battctx[c].bc_chrg_fsm) {
 			case CHRG_MPPT:
 			case CHRG_RAMPUP:
@@ -550,8 +588,8 @@ chrg_runfsm()
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
 		} else if (pwm_fsm == PWMF_IDLE && active_batt != BATT_NONE) {
-			if (active_battctx.bc_stat != BATTS_NONE &&
-			    active_battctx.bc_stat != BATTS_ERR) {
+			if (active_battctx.bc_stat == BATTS_BULK ||
+			    active_battctx.bc_stat == BATTS_FLOAT) {
 				batt_en(active_batt);
 				active_battctx.bc_sw_time = timer0_read();
 				pwm_duty_c = 20; /* start at 10% */
@@ -695,10 +733,10 @@ chrg_runfsm()
 				chrg_volt_target_cnt++;
 				/*
 				 * if we're above target + 0.1 for more than
-				 * 1s, or above target + 0.5, switch to
+				 * 0.4s, or above target + 0.5, switch to
 				 * CV mode.
 				 */
-				if (chrg_volt_target_cnt > 100 || /* 1s */
+				if (chrg_volt_target_cnt > 40 || /* 0.4s */
 				    (active_battv / 10) > active_battctx.bc_cv + 5) {
 					chrg_volt_target_cnt = 0;
 					chrg_fsm = CHRG_CV;
@@ -727,18 +765,19 @@ chrg_runfsm()
 			chrg_fsm = CHRG_GODOWN;
 		} else if (pac_events.bits.bvalues_updated) {
 			pac_events.bits.bvalues_updated = 0;
-			if ((active_battv / 10) < active_battctx.bc_cv - 1) {
+			/* wait for grace period before checking for mode sw */
+			if (chrg_batt_grace)
+				chrg_batt_grace--;
+			if (chrg_batt_grace == 0 &&
+			    (active_battv / 10) < active_battctx.bc_cv - 1) {
 				chrg_volt_target_cnt++;
-				if (chrg_batt_grace)
-					chrg_batt_grace--;
 				/*
 				 * if we're below target - 0.1 for more than
-				 * 1s, or below target - 0.5, switch to
-				 * MPPT mode, but wait for grace counter
+				 * 0.1s, or below target - 0.5, switch to
+				 * MPPT mode
 				 */
-				if (chrg_batt_grace == 0 &&
-				    (chrg_volt_target_cnt > 10 || /* 0.1s */
-				    (active_battv / 10) < active_battctx.bc_cv - 5)) {
+				if (chrg_volt_target_cnt > 10 || /* 0.1s */
+				    (active_battv / 10) < active_battctx.bc_cv - 5) {
 					pwm_duty_c = 20; /* start at 10% */
 					pwm_set_duty();
 					active_battctx.bc_r_chrg.chrgp_iout = -1;
@@ -2754,13 +2793,17 @@ again:
 	chrg_fsm = CHRG_DOWN;
 	chrg_events.byte = 0;
 
+	/* XXX from eeprom ? */
+	bparams[BATT_1 - BATT_1].bp_stby_voltage = 125;
+	bparams[BATT_1 - BATT_1].bp_bulk_voltage = 140;
+	bparams[BATT_1 - BATT_1].bp_float_voltage = 135;
+	bparams[BATT_2 - BATT_1].bp_stby_voltage = 125;
+	bparams[BATT_2 - BATT_1].bp_bulk_voltage = 140;
+	bparams[BATT_2 - BATT_1].bp_float_voltage = 135;
+
 	active_batt = BATT_1;
-	battctx[BATT_2 - BATT_1].bc_cv = 140; /* XXX from eeprom ? */
-	battctx[BATT_1 - BATT_1].bc_cv = 140; /* XXX from eeprom ? */
 	battctx[BATT_2 - BATT_1].bc_stat = BATTS_NONE;
 	battctx[BATT_1 - BATT_1].bc_stat = BATTS_NONE;
-	battctx[BATT_2 - BATT_1].bc_chrg_fsm = CHRG_RAMPUP;
-	battctx[BATT_1 - BATT_1].bc_chrg_fsm = CHRG_RAMPUP;
 
 	oled_col = 20;
 	oled_line = 5;
@@ -3094,16 +3137,7 @@ again:
 				batt_s_idx = BATT_S_NCOUNT;
 			// printf("\n");
 			if (pwm_error == PWME_NOERROR) {
-				if (battctx[0].bc_stat == BATT_NONE &&
-				    batt_v[0] / 10 > BATT_MINV) {
-					battctx[0].bc_stat = BATTS_CC;
-					battctx[0].bc_sw_time = timer0_read();
-				}
-				if (battctx[1].bc_stat == BATT_NONE &&
-				    batt_v[1] / 10 > BATT_MINV) {
-					battctx[1].bc_stat = BATTS_CC;
-					battctx[1].bc_sw_time = timer0_read();
-				}
+				check_batt_status();
 			}
 			pac_events.bits.bvalues_updated = 1;
 			if (pwm_fsm == PWMF_RUNNING) {
@@ -3123,15 +3157,14 @@ again:
 					negative_current_count = 0;
 				else {
 					negative_current_count++;
-					printf("battneg %d\n", negative_current_count);
+					printf("battneg %d %d\n", negative_current_count, active_batt);
 				}
 				if (negative_current_count >= 5) {
 					pwm_error = PWME_BATTCUR;
 					pwm_events.bits.gooff = 1;
 					pwme_time = 0;
-					/* check batteries again */
-					battctx[0].bc_stat = BATTS_NONE;
-					battctx[1].bc_stat = BATTS_NONE;
+					/* check battery again */
+					active_battctx.bc_stat = BATTS_NONE;
 				}
 			} else {
 				negative_current_count = 0;
@@ -3143,13 +3176,13 @@ again:
 				 * than batteries by 1V, if batteries are
 				 * present
 				 */
-				if (battctx[0].bc_stat != BATTS_NONE ||
-				    battctx[1].bc_stat != BATTS_NONE)
+				if (check_batt_active(0) ||
+				    check_batt_active(1))
 					chrg_events.bits.goon = 1;
-				if (battctx[0].bc_stat != BATTS_NONE &&
+				if (check_batt_active(0) &&
 				    batt_v[2] < batt_v[0] + 100)
 					chrg_events.bits.goon = 0;
-				if (battctx[1].bc_stat != BATTS_NONE &&
+				if (check_batt_active(1) &&
 				    batt_v[2] < batt_v[1] + 100)
 					chrg_events.bits.goon = 0;
 			}
