@@ -500,7 +500,6 @@ batt_switch_active()
 	switch(active_batt) {
 	case BATT_1:
 		if (check_batt_active(BATT_2 - BATT_1)) {
-			printf("bact 1 2\n");
 			active_batt = BATT_2;
 			return 1;
 		}
@@ -508,7 +507,6 @@ batt_switch_active()
 	case BATT_2:
 		if (check_batt_active(BATT_1 - BATT_1)) {
 			active_batt = BATT_1;
-			printf("bact 2 1\n");
 			return 1;
 		}
 		break;
@@ -2096,6 +2094,21 @@ display_battstat_debug()
 		oled_col = 60;
 		oled_line = 3;
 		sprintf(oled_displaybuf, "%2.2f%c", (float)board_temp / 100.0 - 273.15, 20);
+		displaybuf_small();
+	}
+	/*
+	 * once per second display battery status
+	 * choose a counter_10hz value that doesn't conflict with
+	 * display_battstat_small();
+	 */
+	if (counter_10hz == 4) {
+		oled_col = 54;
+		oled_line = 4;
+		sprintf(oled_displaybuf, "%1x", battctx[1].bc_stat);
+		displaybuf_small();
+		oled_col = 54;
+		oled_line = 7;
+		sprintf(oled_displaybuf, "%1x", battctx[0].bc_stat);
 		displaybuf_small();
 	}
 	/* display charger and pwm states 10 times per second */
