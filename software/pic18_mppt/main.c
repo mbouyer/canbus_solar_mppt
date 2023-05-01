@@ -535,7 +535,7 @@ schedule_batt_switch()
 				break;
 			case CHRG_CV:
 				/* don't schedule if battery already too high*/
-				if (battctx[c].bc_chrg_cv <= batt_v[c] + 1 ||
+				if (battctx[c].bc_cv <= batt_v[c] + 1 ||
 				    c == active_bidx)
 					bw[c] = 10;
 				break;
@@ -555,7 +555,7 @@ schedule_batt_switch()
 	}
 
 	if (chrg_fsm == CHRG_DOWN) {
-		chrg_events.bits.gon = 1;
+		chrg_events.bits.goon = 1;
 		/*
 		 * ready to start ? needs solar higher than batteries by 1V,
 		 * if batteries are present
