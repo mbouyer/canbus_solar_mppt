@@ -32,7 +32,7 @@
 
 #include <xc.h> 
 #include "ntc_tab.h"
-const struct temp_val const temps[] = {
+const struct temp_val temps[] = {
 	{
 		.temp = 35315,
 		.val = 3634, /* R = 1270 Ohm */
