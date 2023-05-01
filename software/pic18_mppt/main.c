@@ -75,8 +75,8 @@ u_int timer0_read(void);
 
 typedef enum {
 	BATT_NONE = 0,
-	BATT_1 = 1,
-	BATT_2 = 2,
+	BATT_1 = 1, /* engine */
+	BATT_2 = 2, /* service */
 } batt_t;
 
 static void
