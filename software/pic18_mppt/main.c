@@ -534,7 +534,10 @@ schedule_batt_switch()
 				bw[c] = 90;
 				break;
 			case CHRG_CV:
-				bw[c] = 10;
+				/* don't schedule if battery already too high*/
+				if (battctx[c].bc_chrg_cv <= batt_v[c] + 1 ||
+				    c == active_bidx)
+					bw[c] = 10;
 				break;
 			default:
 				break;
@@ -546,8 +549,21 @@ schedule_batt_switch()
 	}
 	if (sum == 0) {
 		/* nothing active, turn off if needed */
-		if (chrg_fsm != 0)
-			chrg_events.bits.gooff;
+		if (chrg_fsm != CHRG_DOWN)
+			chrg_events.bits.gooff = 1;
+		return;
+	}
+
+	if (chrg_fsm == CHRG_DOWN) {
+		chrg_events.bits.gon = 1;
+		/*
+		 * ready to start ? needs solar higher than batteries by 1V,
+		 * if batteries are present
+		 */
+		if (check_batt_active(0) && batt_v[2] < batt_v[0] + 100)
+			chrg_events.bits.goon = 0;
+		if (check_batt_active(1) && batt_v[2] < batt_v[1] + 100)
+			chrg_events.bits.goon = 0;
 		return;
 	}
 
@@ -3328,13 +3344,10 @@ again:
 				/* restart when below TEMP_RESTART */
 				if (board_temp < TEMP_RESTART) {
 					pwm_error = PWME_NOERROR;
-					chrg_events.bits.goon = 1;
 				}
 			} else {
 				pwme_time++;
 				if (pwme_time >= 20) {
-					if (pwm_error != PWME_BATTCUR)
-						chrg_events.bits.goon = 1;
 					pwm_error = PWME_NOERROR;
 				}
 			}
@@ -3596,32 +3609,12 @@ again:
 					pwm_error = PWME_BATTCUR;
 					pwm_events.bits.gooff = 1;
 					pwme_time = 0;
-					/* check battery again */
-					active_battctx.bc_stat = BATTS_NONE;
 				}
 			} else {
 				negative_current_count = 0;
 			}
-			if (chrg_fsm == CHRG_DOWN && 
-			    pwm_error == PWME_NOERROR) {
-				/*
-				 * ready to start ? needs solar higher
-				 * than batteries by 1V, if batteries are
-				 * present
-				 */
-				if (check_batt_active(0) ||
-				    check_batt_active(1))
-					chrg_events.bits.goon = 1;
-				if (check_batt_active(0) &&
-				    batt_v[2] < batt_v[0] + 100)
-					chrg_events.bits.goon = 0;
-				if (check_batt_active(1) &&
-				    batt_v[2] < batt_v[1] + 100)
-					chrg_events.bits.goon = 0;
-			}
-		}
-		if (time_events.bits.ev_100hz) {
-			schedule_batt_switch();
+			if (pwm_error == PWME_NOERROR)
+				schedule_batt_switch();
 		}
 		pac_command_schedule();
 		while (i2c_return != I2C_INPROGRESS) {
