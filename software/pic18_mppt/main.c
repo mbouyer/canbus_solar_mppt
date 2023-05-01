@@ -198,16 +198,6 @@ static union pac_events {
 	char byte;
 } pac_events;
 
-static enum {
-	BTN_IDLE = 0,
-	BTN_DOWN,
-	BTN_DOWN_1,
-	BTN_DOWN_1_P,
-	BTN_DOWN_2,
-	BTN_DOWN_2_P,
-	BTN_UP
-} btn_state;
-
 /*
  * PWM fsm:
  * DOWN: everything off (PWM_OFF = 1, PWM_MID = PWM_OUT = 0), wait for power
@@ -554,6 +544,13 @@ schedule_batt_switch()
 		}
 		sum += bw[c];
 	}
+	if (sum == 0) {
+		/* nothing active, turn off if needed */
+		if (chrg_fsm != 0)
+			chrg_events.bits.gooff;
+		return;
+	}
+
 	sum = sum / 10;
 	time = bw[active_bidx] / sum;
 	if (time < 10) {
@@ -1944,13 +1941,19 @@ oled_i2c_reset(void)
 #define OLED_CTRL_WRITE {oled_s->oled_type = OLED_CTRL_CMD; oled_i2c_state = OLED_I2C_WAIT; oled_i2c_flush(); oled_i2c_reset();}
 	
 static uint8_t
-displaybuf_small(void)
+displaybuf_small(char invert)
 {
 	const u_char *font;
 	char *cp;
 	u_char len;
 	u_char i;
 	struct oled_i2c_buf_s *oled_s;
+	u_char inv;
+
+	if (invert)
+		inv = 0xff;
+	else
+		inv = 0;
 
 	if ((oled_s = oled_i2c_reset()) == NULL)
 		return 0;
@@ -1963,9 +1966,9 @@ displaybuf_small(void)
 		}
 		font = get_font5x8(*cp);
 		for (i = 0; i < 5; i++) {
-			oled_s->oled_databuf[oled_s->oled_datalen++] = font[i];
+			oled_s->oled_databuf[oled_s->oled_datalen++] = font[i] ^ inv;
 		}
-		oled_s->oled_databuf[oled_s->oled_datalen++] = 0;
+		oled_s->oled_databuf[oled_s->oled_datalen++] = inv;
 	}
 	if (len == 0)
 		len = (u_char)oled_s->oled_datalen;
@@ -1982,12 +1985,18 @@ displaybuf_small(void)
 }
 
 static uint8_t
-displaybuf_medium(void)
+displaybuf_medium(char invert)
 {
 	const u_char *font;
 	char *cp;
 	u_char i, n;
 	struct oled_i2c_buf_s *oled_s;
+	u_char inv;
+
+	if (invert)
+		inv = 0xff;
+	else
+		inv = 0x00;
 
 	if ((oled_s = oled_i2c_reset()) == NULL)
 		return 0;
@@ -1995,13 +2004,13 @@ displaybuf_medium(void)
 	for (n = 0, cp = oled_displaybuf; *cp != '\0'; cp++) {
 		font = get_font10x16(*cp);
 		for (i = 0; i < 10; i++, n++) {
-			oled_s->oled_databuf[n] = font[i * 2];
+			oled_s->oled_databuf[n] = font[i * 2] ^ inv;
 		}
 	}
 	for (cp = oled_displaybuf; *cp != '\0'; cp++) {
 		font = get_font10x16(*cp);
 		for (i = 0; i < 10; i++, n++) {
-			oled_s->oled_databuf[n] = font[i * 2 + 1];
+			oled_s->oled_databuf[n] = font[i * 2 + 1] ^ inv;
 		}
 	}
 	oled_s->oled_datalen = n;
@@ -2058,6 +2067,18 @@ display_clear()
 	return 1;
 }
 
+/* display management */
+
+typedef enum {
+	PAGE_BATTSTAT,
+	PAGE_BATTSTAT_DETAILS,
+	PAGE_BATTSTAT_DEBUG,
+	PAGE_BATTLIST,
+	PAGE_BATTLIST_STATE,
+} page_t;
+
+static page_t active_page;
+
 /*
  * page status:
  *  0: update state
@@ -2065,6 +2086,8 @@ display_clear()
  * set to 1 on page switch
  */
 uint8_t page_status; 
+
+static void new_page(page_t);
 
 static void
 battstat2buf_small(u_char b)
@@ -2090,11 +2113,11 @@ battstat2buf_small(u_char b)
 		sprintf(oled_displaybuf,
 		    "%2d.%1dV\n%1.02fA", _v / 100, (_v % 100) / 10, amps);
 	}
-	displaybuf_small();
+	displaybuf_small(0);
 }
 
 static void
-display_battstat_small_init()
+display_battstat_icons(char solar)
 {
 	/* clear display and put static infos */
 	switch(page_status) {
@@ -2104,10 +2127,12 @@ display_battstat_small_init()
 		page_status++;
 		/* fallthrough */
 	case 2:
-		oled_col = 0;
-		oled_line = 0;
-		if (displaybuf_icon(ICON_SUN) == 0)
-			return;
+		if (solar) {
+			oled_col = 0;
+			oled_line = 0;
+			if (displaybuf_icon(ICON_SUN) == 0)
+				return;
+		}
 		page_status++;
 		/* fallthrough */
 	case 3:
@@ -2136,7 +2161,7 @@ static void
 display_battstat_small()
 {
 	if (page_status != 0) {
-		display_battstat_small_init();
+		display_battstat_icons(1);
 		return;
 	}
 	if ((counter_10hz & 1) == 1) {
@@ -2176,15 +2201,15 @@ display_battstat_debug()
 		oled_col = 60;
 		oled_line = 1;
 		sprintf(oled_displaybuf, "%4x", ad_pwm);
-		displaybuf_small();
+		displaybuf_small(0);
 		oled_col = 60;
 		oled_line = 2;
 		sprintf(oled_displaybuf, "%4x", ad_solar);
-		displaybuf_small();
+		displaybuf_small(0);
 		oled_col = 60;
 		oled_line = 3;
 		sprintf(oled_displaybuf, "%2.2f%c", (float)board_temp / 100.0 - 273.15, 20);
-		displaybuf_small();
+		displaybuf_small(0);
 	}
 	/*
 	 * once per second display battery status
@@ -2195,17 +2220,39 @@ display_battstat_debug()
 		oled_col = 54;
 		oled_line = 4;
 		sprintf(oled_displaybuf, "%1x", battctx[1].bc_stat);
-		displaybuf_small();
+		displaybuf_small(0);
 		oled_col = 54;
 		oled_line = 7;
 		sprintf(oled_displaybuf, "%1x", battctx[0].bc_stat);
-		displaybuf_small();
+		displaybuf_small(0);
 	}
 	/* display charger and pwm states 10 times per second */
 	oled_col = 54;
 	oled_line = 5;
 	sprintf(oled_displaybuf, "%1x %1x %1x %2x %1x", pwm_fsm, pwm_error, chrg_fsm, pwm_duty_c, active_batt);
-	displaybuf_small();
+	displaybuf_small(0);
+}
+
+static void
+displaybuf_battstat(char b)
+{
+	switch(battctx[b].bc_stat) {
+	case BATTS_NONE:
+		sprintf(oled_displaybuf, "none   ");
+		break;
+	case BATTS_BULK:
+		sprintf(oled_displaybuf, "bulk   ");
+		break;
+	case BATTS_FLOAT:
+		sprintf(oled_displaybuf, "float  ");
+		break;
+	case BATTS_STANDBY:
+		sprintf(oled_displaybuf, "standby");
+		break;
+	case BATTS_ERR:
+		sprintf(oled_displaybuf, "error  ");
+		break;
+	}
 }
 
 static void
@@ -2231,11 +2278,11 @@ display_battstat_details()
 		} else {
 			sprintf(oled_displaybuf, "a ---");
 		}
-		displaybuf_small();
+		displaybuf_small(0);
 		oled_col = 60;
 		oled_line = 1;
 		sprintf(oled_displaybuf, "%2.1f%c", (float)board_temp / 100.0 - 273.15, 20);
-		displaybuf_small();
+		displaybuf_small(0);
 	}
 	/*
 	 * once per second display battery status
@@ -2246,24 +2293,8 @@ display_battstat_details()
 		for (uint8_t c = 0; c < 2; c++) {
 			oled_col = 54;
 			oled_line = (c == 0) ? 7 : 4;
-			switch(battctx[c].bc_stat) {
-			case BATTS_NONE:
-				sprintf(oled_displaybuf, "none   ");
-				break;
-			case BATTS_BULK:
-				sprintf(oled_displaybuf, "bulk   ");
-				break;
-			case BATTS_FLOAT:
-				sprintf(oled_displaybuf, "float  ");
-				break;
-			case BATTS_STANDBY:
-				sprintf(oled_displaybuf, "standby");
-				break;
-			case BATTS_ERR:
-				sprintf(oled_displaybuf, "error  ");
-				break;
-			}
-			displaybuf_small();
+			displaybuf_battstat(c);
+			displaybuf_small(0);
 		}
 	}
 }
@@ -2292,7 +2323,7 @@ battstat2buf(u_char b)
 		sprintf(oled_displaybuf,
 		    "%2d.%1d %1.02f", _v / 100, (_v % 100) / 10, amps);
 	}
-	displaybuf_medium();
+	displaybuf_medium(0);
 }
 
 static void
@@ -2304,13 +2335,13 @@ display_battstat_init()
 	case 2:
 	case 3:
 	case 4:
-		display_battstat_small_init();
+		display_battstat_icons(1);
 		return;
 	case 5:
 		oled_col = 40; /* 20 + 2 * 10 */
 		oled_line = 2;
 		sprintf(oled_displaybuf, "V       A");
-		if (displaybuf_small() == 0)
+		if (displaybuf_small(0) == 0)
 			return;
 		/* fallthrough */
 	default:
@@ -2344,13 +2375,104 @@ display_battstat()
 	}
 }
 
-typedef enum {
-	PAGE_BATTSTAT,
-	PAGE_BATTSTAT_DETAILS,
-	PAGE_BATTSTAT_DEBUG,
-} page_t;
+static batt_t battlist_selected;
 
-static page_t active_page;
+static void
+display_battlist()
+{
+	switch(page_status) {
+	case 0:
+		return;
+	case 1:
+	case 2:
+	case 3:
+	case 4:
+		display_battstat_icons(0);
+		/* fallthrough */
+	case 5:
+		oled_col = 22;
+		oled_line = 3;
+		sprintf(oled_displaybuf, "B2");
+		if (displaybuf_medium(battlist_selected == BATT_2) == 0)
+			return;
+		page_status++;
+		/* fallthrough */
+	case 6:
+		oled_col = 22;
+		oled_line = 6;
+		sprintf(oled_displaybuf, "B1");
+		if (displaybuf_medium(battlist_selected == BATT_1) == 0)
+			return;
+		page_status++;
+		/* fallthrough */
+	case 7:
+		oled_col = 42;
+		oled_line = 3;
+		displaybuf_battstat(BATT_2 - BATT_1);
+		if (displaybuf_medium(battlist_selected == BATT_2 &&
+		    active_page == PAGE_BATTLIST_STATE) == 0)
+			return;
+		page_status++;
+		/* fallthrough */
+	case 8:
+		oled_col = 42;
+		oled_line = 6;
+		displaybuf_battstat(BATT_1 - BATT_1);
+		if (displaybuf_medium(battlist_selected == BATT_1 &&
+		    active_page == PAGE_BATTLIST_STATE) == 0)
+			return;
+		page_status = 0;
+		/* fallthrough */
+	default:
+		return;
+	}
+}
+
+static void
+battlist_next()
+{
+	if(battlist_selected == BATT_2)
+		battlist_selected = BATT_1;
+	else
+		battlist_selected = BATT_2;
+	page_status = 5; /* refresh display */
+}
+
+static void
+battlist_select()
+{
+	new_page(PAGE_BATTLIST_STATE);
+}
+
+static void
+battstate_next()
+{
+	char c = battlist_selected - BATT_1;
+	switch(battctx[c].bc_stat) {
+	case BATTS_BULK:
+		battctx[c].bc_stat = BATTS_FLOAT;
+		battctx[c].bc_cv = bparams[c].bp_float_voltage;
+		break;
+	case BATTS_FLOAT:
+		battctx[c].bc_stat = BATTS_STANDBY;
+		break;
+	case BATTS_STANDBY:
+		battctx[c].bc_stat = BATTS_BULK;
+		battctx[c].bc_cv = bparams[c].bp_bulk_voltage;
+		battctx[c].bc_sw_time = timer0_read();
+		battctx[c].bc_chrg_fsm = CHRG_RAMPUP;
+		break;
+	default:
+		break;
+	}
+	page_status = 7; /* refresh display */
+}
+
+static void
+battstate_select()
+{
+	new_page(PAGE_BATTSTAT_DETAILS);
+}
 
 static void
 display_page()
@@ -2365,22 +2487,136 @@ display_page()
 	case PAGE_BATTSTAT_DEBUG:
 		display_battstat_debug();
 		break;
+	case PAGE_BATTLIST:
+	case PAGE_BATTLIST_STATE:
+		display_battlist();
+		break;
 	}
+}
+
+static void
+new_page(page_t p)
+{
+	page_status = 1;
+	active_page = p;
+	display_page();
 }
 
 static void
 next_page()
 {
-	page_status = 1;
 	switch(active_page) {
 	case PAGE_BATTSTAT:
-		active_page = PAGE_BATTSTAT_DETAILS;
+		new_page(PAGE_BATTSTAT_DETAILS);
 		break;
 	case PAGE_BATTSTAT_DETAILS:
-		active_page = PAGE_BATTSTAT_DEBUG;
+		new_page(PAGE_BATTSTAT_DEBUG);
 		break;
 	case PAGE_BATTSTAT_DEBUG:
-		active_page = PAGE_BATTSTAT;
+		new_page(PAGE_BATTSTAT);
+		break;
+	default:
+		break;
+	}
+}
+
+static void
+previous_page()
+{
+	switch(active_page) {
+	case PAGE_BATTSTAT:
+		new_page(PAGE_BATTSTAT_DEBUG);
+		break;
+	case PAGE_BATTSTAT_DEBUG:
+		new_page(PAGE_BATTSTAT_DETAILS);
+		break;
+	case PAGE_BATTSTAT_DETAILS:
+		new_page(PAGE_BATTSTAT);
+		break;
+	default:
+		break;
+	}
+}
+
+/* button FSM */
+static enum {
+	BTN_IDLE = 0,
+	BTN_DOWN,
+	BTN_DOWN_1,
+	BTN_DOWN_1_P,
+	BTN_DOWN_2,
+	BTN_DOWN_2_P,
+	BTN_UP
+} btn_state;
+
+u_int btn_time; /* key press time */
+#define BTN_LONG_PRESS (TIMER0_100MS * 5)
+
+static void
+btn1_short()
+{
+	switch(active_page) {
+	case PAGE_BATTSTAT:
+	case PAGE_BATTSTAT_DETAILS:
+	case PAGE_BATTSTAT_DEBUG:
+		previous_page();
+		break;
+	case PAGE_BATTLIST:
+		battlist_select();
+		break;
+	case PAGE_BATTLIST_STATE:
+		battstate_select();
+	}
+}
+
+static void
+btn1_long()
+{
+	printf("B1 long %d\n", active_page);
+	switch(active_page) {
+	case PAGE_BATTSTAT:
+	case PAGE_BATTSTAT_DETAILS:
+	case PAGE_BATTSTAT_DEBUG:
+		battlist_selected = BATT_2;
+		new_page(PAGE_BATTLIST);
+		break;
+	case PAGE_BATTLIST:
+	case PAGE_BATTLIST_STATE:
+		new_page(PAGE_BATTSTAT_DETAILS);
+	default:
+		break;
+	}
+}
+
+static void
+btn2_short()
+{
+	switch(active_page) {
+	case PAGE_BATTSTAT:
+	case PAGE_BATTSTAT_DETAILS:
+	case PAGE_BATTSTAT_DEBUG:
+		next_page();
+		break;
+	case PAGE_BATTLIST:
+		battlist_next();
+		break;
+	case PAGE_BATTLIST_STATE:
+		battstate_next();
+		break;
+	}
+}
+
+static void
+btn2_long()
+{
+	switch(active_page) {
+	case PAGE_BATTSTAT:
+		break;
+	case PAGE_BATTSTAT_DETAILS:
+		break;
+	case PAGE_BATTSTAT_DEBUG:
+		break;
+	default:
 		break;
 	}
 }
@@ -2974,7 +3210,7 @@ again:
 	oled_col = 20;
 	oled_line = 5;
 	sprintf(oled_displaybuf, "hello");
-	displaybuf_medium();
+	displaybuf_medium(0);
 	oled_i2c_flush();
 
 	for (c = 0; c < 4; c++) {
@@ -3109,18 +3345,20 @@ again:
 			softintrs.bits.int_btn_down = 0;
 			if (btn_state == BTN_IDLE) {
 				btn_state = BTN_DOWN;
+				btn_time = timer0_read();
 			}
 		}
 		if (softintrs.bits.int_btn_up) {
 			switch(btn_state) {
 			case BTN_DOWN_1_P:
 				softintrs.bits.int_btn_up = 0;
+				btn1_short();
 				/* this is a up event */
 				btn_state = BTN_UP;
 				break;
 			case BTN_DOWN_2_P:
-				next_page();
 				softintrs.bits.int_btn_up = 0;
+				btn2_short();
 				/* this is a up event */
 				btn_state = BTN_UP;
 				break;
@@ -3196,14 +3434,26 @@ again:
 			}
 			break;
 		case BTN_DOWN_1:
-			oled_col = 60;
-			oled_line = 4;
 			printf("B1\n");
 			btn_state = BTN_DOWN_1_P;
+			break;
+		case BTN_DOWN_1_P:
+			if ((timer0_read() - btn_time) > BTN_LONG_PRESS) {
+				btn1_long();
+				/* this is a up event */
+				btn_state = BTN_UP;
+			}
 			break;
 		case BTN_DOWN_2:
 			printf("B2\n");
 			btn_state = BTN_DOWN_2_P;
+			break;
+		case BTN_DOWN_2_P:
+			if ((timer0_read() - btn_time) > BTN_LONG_PRESS) {
+				btn2_long();
+				/* this is a up event */
+				btn_state = BTN_UP;
+			}
 			break;
 		case BTN_UP:
 			printf("up\n");
