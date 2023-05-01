@@ -1445,78 +1445,117 @@ adctotemp(u_char c)
 }
 
 static void
-send_batt_status(char c)
+send_controller_status(char b)
 {
 	if (nmea2000_status != NMEA2000_S_OK)
 		return;
 
-	struct nmea2000_battery_status_data *data = (void *)&nmea2000_data[0];
+	struct nmea2000_load_controller_data *data = (void *)&nmea2000_data[0];
 
-	if ((pac_ctrl.ctrl_chan_dis & (8 >> c)) != 0)
+	if (b < BATT_1 || b > BATT_2)
+		return;
+	char bidx = b - BATT_1;
+	if (battctx[bidx].bc_stat == BATTS_NONE)
 		return;
 
-	PGN2ID(NMEA2000_BATTERY_STATUS, msg.id);
+	PGN2ID(NMEA2000_LOAD_CONTROLLER_STATE, msg.id);
 	msg.id.priority = NMEA2000_PRIORITY_INFO;
-	msg.dlc = sizeof(struct nmea2000_battery_status_data);
+	msg.dlc = sizeof(struct nmea2000_load_controller_data);
 	msg.data = &nmea2000_data[0];
-	data->voltage = (int16_t)batt_v[c];
-	data->current = batt_i[c];
-	data->temp = board_temp;
 	data->sid = sid;
-	data->instance = c;
+	data->conn = b;
+	data->state = battctx[bidx].bc_stat;
+	if (check_batt_active(bidx)) {
+		if (b == active_batt) {
+			data->op_status = chrg_fsm;
+			data->pwm_duty = pwm_duty_c;
+		} else {
+			data->op_status = battctx[bidx].bc_chrg_fsm;
+			data->pwm_duty =  battctx[bidx].bc_chrg.chrgp_pwm;
+		}
+	} else {
+		data->op_status = 0;
+		data->pwm_duty =  0;
+	}
+	data->status = 0;
+	data->ton = 0;
+	data->toff = 0;
 	if (! nmea2000_send_single_frame(&msg))
-		printf("send NMEA2000_BATTERY_STATUS failed\n");
+		printf("send NMEA2000_LOAD_CONTROLLER_STATE failed\n");
 }
 
-#if 0
-
 static void
-send_dc_status(void)
+send_dc_voltage_current(char b)
 {
-	struct nmea2000_dc_status_data *data = (void *)&nmea2000_data[0];
-	static u_char fastid;
-
-	if (input_volt == 0xffff)
+	if (nmea2000_status != NMEA2000_S_OK)
 		return;
 
-	fastid = (fastid + 1) & 0x7;
-	printf("power voltage %d.%03dV\n",
-	    (int)(input_volt / 1000), (int)(input_volt % 1000));
+	struct nmea2000_dc_voltage_current_data *data = (void *)&nmea2000_data[0];
+	char bidx;
 
-	PGN2ID(NMEA2000_DC_STATUS, msg.id);
+	switch(b) {
+	case 0:
+		bidx = 2;
+		break;
+	case 1:
+		bidx = 0;
+		break;
+	case 2:
+		bidx = 1;
+		break;
+	default:
+		return;
+	}
+
+	uint16_t _v = 0;
+	int16_t  _i = 0;
+	for (uint8_t c = 0; c < BATT_S_NCOUNT; c++) {
+		_v += batt_v_s[c][bidx];
+		_i += batt_i_s[c][bidx];
+	}
+	_v = _v / BATT_S_NCOUNT;
+	_i = _i / BATT_S_NCOUNT;
+
+	PGN2ID(NMEA2000_DC_VOLTAGE_CURRENT, msg.id);
 	msg.id.priority = NMEA2000_PRIORITY_INFO;
-	msg.dlc = sizeof(struct nmea2000_dc_status_data);
+	msg.dlc = sizeof(struct nmea2000_dc_voltage_current_data);
+	msg.data = &nmea2000_data[0];
+	data->sid = sid;
+	data->conn = b;
+	data->voltage = _v;
+	__int24 *_ip = (__int24*)(data->current);
+	*_ip = _i;
+	data->reserved = 0;
+	if (! nmea2000_send_single_frame(&msg))
+		printf("send NMEA2000_DC_VOLTAGE_CURRENT failed\n");
+}
+
+static void
+send_temperature()
+{
+	if (nmea2000_status != NMEA2000_S_OK)
+		return;
+
+	if (board_temp == 0xffff)
+		return;
+
+	struct nmea2000_temp *data = (void *)&nmea2000_data[0];
+
+	PGN2ID(NMEA2000_TEMP, msg.id);
+	msg.id.priority = NMEA2000_PRIORITY_INFO;
+	msg.dlc = sizeof(struct nmea2000_temp);
 	msg.data = &nmea2000_data[0];
 	data->sid = sid;
 	data->instance = 0;
-	switch(power_status) {
-	case UNKOWN:
-		return;
-	case OFF:
-		data->type = DCSTAT_TYPE_BATT;
-		if (batt_v > 1240) {
-			data->soc = 100 - ((u_long)time_on_batt * 100UL / 7200UL);
-		} else {
-			data->soc = 50 - (1240 - batt_v) * 50 / (1240 - 1100);
-		}
-		data->soh = 0xff;
-		data->timeremain = 0xffff; /* XXX compute */
-		data->ripple = 0xffff;
-		break;
-	default:
-		/* assume operating on mains power */
-		data->type = DCSTAT_TYPE_CONV;
-		data->soc = 0xff;
-		data->soh =
-		    ((u_long)input_volt * 100UL + 6000UL) / 12000;
-		data->timeremain = 0xffff;
-		data->ripple = 0xffff;
-		break;
-	}
-	if (! nmea2000_send_fast_frame(&msg, fastid))
-		printf("send NMEA2000_DC_STATUS failed\n");
+	data->source = ENV_TSOURCE_INSIDE;
+	__uint24 *_tp = (__uint24*)(data->temp);
+	*_tp = (__uint24)board_temp * 10;
+	data->settemp = TEMP_MAX / 10;
+	if (! nmea2000_send_single_frame(&msg))
+		printf("send NMEA2000_TEMP failed\n");
 }
 
+#if 0
 static void
 send_charger_status()
 {
@@ -1543,16 +1582,20 @@ user_handle_iso_request(u_long pgn)
 {
 	printf("ISO_REQUEST for %ld from %d\n", pgn, rid.saddr);
 	switch(pgn) {
-	case NMEA2000_BATTERY_STATUS:
-		for (char c = 0; c < 4; c++) {
-			if ((pac_ctrl.ctrl_chan_dis & (8 >> c)) == 0)
-				send_batt_status(c);
+	case NMEA2000_DC_VOLTAGE_CURRENT:
+		for (char c = 0; c < 3; c++) {
+			send_dc_voltage_current(c);
 		}
 		break;
-#if 0
-	case NMEA2000_DC_STATUS:
-		send_dc_status();
+	case NMEA2000_LOAD_CONTROLLER_STATE:
+		for (char c = BATT_1; c <= BATT_2; c++) {
+			send_controller_status(c);
+		}
 		break;
+	case NMEA2000_TEMP:
+		send_temperature();
+		break;
+#if 0
 	case NMEA2000_CHARGER_STATUS:
 		send_charger_status();
 		break;
@@ -3030,6 +3073,14 @@ again:
 				if (battctx[c].bc_rp_time != 0)
 					battctx[c].bc_rp_time--;
 			}
+			for (char c = 0; c < 3; c++) {
+				send_dc_voltage_current(c);
+			}
+			for (char c = BATT_1; c <= BATT_2; c++) {
+				send_controller_status(c);
+			}
+			send_temperature();
+			SIDINC(sid);
 		}
 
 		chrg_runfsm();
