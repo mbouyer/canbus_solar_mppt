@@ -3592,7 +3592,7 @@ again:
 					negative_current_count++;
 					printf("battneg %d %d\n", negative_current_count, active_batt);
 				}
-				if (negative_current_count >= 5) {
+				if (negative_current_count >= 10) {
 					pwm_error = PWME_BATTCUR;
 					pwm_events.bits.gooff = 1;
 					pwme_time = 0;
