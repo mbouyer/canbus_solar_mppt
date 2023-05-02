@@ -3613,6 +3613,9 @@ again:
 				if (_read_voltcur.batt_i[c] < 0)
 					negative_current_count = 0;
 				else {
+					/* count faster if more than 20mA */
+					if (_read_voltcur.batt_i[c] > 26)
+						negative_current_count++;
 					negative_current_count++;
 					printf("battneg %d %d\n", negative_current_count, active_batt);
 				}
