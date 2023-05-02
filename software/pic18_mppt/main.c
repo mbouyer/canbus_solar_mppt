@@ -658,7 +658,7 @@ chrg_mppt_compute()
 		active_battctx.bc_r_chrg.chrgp_pwm = pwm_duty_c;
 		active_battctx.bc_r_chrg.chrgp_iout =
 		    -_read_voltcur.batt_i[2 - active_bidx];
-	} else {
+	} else if (timer0_read() - active_battctx.bc_sw_time > TIMER0_1MS * 4) {
 		/* check if we need to re-do a rampup */
 		if (active_battctx.bc_rp_time == 0) {
 			printf("reramp time\n");
@@ -1557,6 +1557,7 @@ send_dc_voltage_current(char b)
 static void
 send_temperature()
 {
+#if 0 //XXX
 	if (nmea2000_status != NMEA2000_S_OK)
 		return;
 
@@ -1577,6 +1578,7 @@ send_temperature()
 	data->settemp = TEMP_MAX / 10;
 	if (! nmea2000_send_single_frame(&msg))
 		printf("send NMEA2000_TEMP failed\n");
+#endif
 }
 
 #if 0
@@ -1616,10 +1618,10 @@ user_handle_iso_request(u_long pgn)
 			send_controller_status(c);
 		}
 		break;
+#if 0 // XXX
 	case NMEA2000_TEMP:
 		send_temperature();
 		break;
-#if 0
 	case NMEA2000_CHARGER_STATUS:
 		send_charger_status();
 		break;
