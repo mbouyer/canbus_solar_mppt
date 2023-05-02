@@ -387,6 +387,7 @@ pwm_set_duty()
 typedef enum {
 	CHRG_DOWN = 0,
 	CHRG_PWMUP,
+	CHRG_RERAMPUP,
 	CHRG_RAMPUP,
 	CHRG_MPPT,
 	CHRG_CV,
@@ -472,7 +473,7 @@ check_batt_status()
 				battctx[c].bc_stat = BATTS_BULK;
 				battctx[c].bc_cv = bparams[c].bp_bulk_voltage;
 				battctx[c].bc_sw_time = timer0_read();
-				battctx[c].bc_chrg_fsm = CHRG_RAMPUP;
+				battctx[c].bc_chrg_fsm = CHRG_RERAMPUP;
 			}
 		}
 	}
@@ -530,6 +531,7 @@ schedule_batt_switch()
 		case BATTS_FLOAT:
 			switch(battctx[c].bc_chrg_fsm) {
 			case CHRG_MPPT:
+			case CHRG_RERAMPUP:
 			case CHRG_RAMPUP:
 				bw[c] = 90;
 				break;
@@ -660,13 +662,13 @@ chrg_mppt_compute()
 		/* check if we need to re-do a rampup */
 		if (active_battctx.bc_rp_time == 0) {
 			printf("reramp time\n");
-			chrg_fsm = CHRG_RAMPUP;
+			chrg_fsm = CHRG_RERAMPUP;
 		}
 		int16_t dtdiff =
 		    ((int16_t)pwm_duty_c - active_battctx.bc_r_chrg.chrgp_pwm);
 		if (abs(dtdiff) > 20) { /* 10% move */
 			printf("reramp duty %d\n", dtdiff);
-			chrg_fsm = CHRG_RAMPUP;
+			chrg_fsm = CHRG_RERAMPUP;
 		}
 		/* cdiff = active_battctx.bc_r_chrg.chrgp_iout - battcur */
 		int32_t cdiff =
@@ -677,7 +679,7 @@ chrg_mppt_compute()
 			    (int)cdiff,
 			    active_battctx.bc_r_chrg.chrgp_iout,
 			    -_read_voltcur.batt_i[2 - active_bidx]);
-			chrg_fsm = CHRG_RAMPUP;
+			chrg_fsm = CHRG_RERAMPUP;
 		}
 
 		if ((_mppt_debug++ % 128) == 0) {
@@ -714,22 +716,31 @@ chrg_runfsm()
 			    active_battctx.bc_stat == BATTS_FLOAT) {
 				batt_en(active_batt);
 				active_battctx.bc_sw_time = timer0_read();
-				pwm_duty_c = 20; /* start at 10% */
-				pwm_set_duty();
-				active_battctx.bc_r_chrg.chrgp_iout = -1;
 				pwm_fsm = PWMF_RUNNING;
 				printf("PWM RUN CON 0x%x PR 0x%x P1 0x%x act %d\n", 
 				    PWM1CON,
 				    PWM1PR,
 				    PWM1S1P1,
 				    active_batt);
-				chrg_fsm = CHRG_RAMPUP;
+				chrg_fsm = CHRG_RERAMPUP;
 			} else {
 				if (active_batt == BATT_1)
 					active_batt = BATT_2;
 				else
 					active_batt = BATT_1;
 			}
+		}
+		break;
+
+	case CHRG_RERAMPUP:
+		if (chrg_events.bits.gooff) {
+			chrg_fsm = CHRG_GODOWN;
+		} else if (pac_events.bits.bvalues_updated) {
+			pac_events.bits.bvalues_updated = 0;
+			pwm_duty_c = 40; /* start at 20% */
+			pwm_set_duty();
+			active_battctx.bc_r_chrg.chrgp_iout = -1;
+			chrg_fsm = CHRG_RAMPUP;
 		}
 		break;
 
@@ -843,7 +854,7 @@ chrg_runfsm()
 					pwm_duty_c = 20; /* start at 10% */
 					pwm_set_duty();
 					active_battctx.bc_r_chrg.chrgp_iout = -1;
-					chrg_fsm = CHRG_RAMPUP;
+					chrg_fsm = CHRG_RERAMPUP;
 					chrg_volt_target_cnt = 0;
 				}
 			} else {
@@ -2476,7 +2487,7 @@ battstate_next()
 		battctx[c].bc_stat = BATTS_BULK;
 		battctx[c].bc_cv = bparams[c].bp_bulk_voltage;
 		battctx[c].bc_sw_time = timer0_read();
-		battctx[c].bc_chrg_fsm = CHRG_RAMPUP;
+		battctx[c].bc_chrg_fsm = CHRG_RERAMPUP;
 		break;
 	default:
 		break;
