@@ -658,7 +658,7 @@ chrg_mppt_compute()
 		active_battctx.bc_r_chrg.chrgp_pwm = pwm_duty_c;
 		active_battctx.bc_r_chrg.chrgp_iout =
 		    -_read_voltcur.batt_i[2 - active_bidx];
-	} else if (timer0_read() - active_battctx.bc_sw_time > TIMER0_1MS * 4) {
+	} else if (timer0_read() - active_battctx.bc_sw_time > TIMER0_5MS * 4) {
 		/* check if we need to re-do a rampup */
 		if (active_battctx.bc_rp_time == 0) {
 			printf("reramp time\n");
