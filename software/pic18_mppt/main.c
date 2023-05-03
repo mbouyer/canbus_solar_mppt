@@ -442,6 +442,7 @@ typedef struct {
 	struct chrg_param bc_chrg; /* current chrg state */
 	struct chrg_param bc_r_chrg; /* best chrg state during rampup */
 	u_int bc_sw_time; /* timer0() at last on switch */
+	u_int bc_sw_duration; /* number of ticks it should be on */
 	u_int bc_rp_time; /* number of seconds in MPPT state */
 } batt_context_t;
 
@@ -514,8 +515,41 @@ batt_switch_active()
 static void
 schedule_batt_switch()
 {
-	/* check if a battery switch is needed:
-	 * compute weight  of each battery: if one * is cc and one is cv,
+	/*
+	 * check if a battery switch is needed:
+	 * first see if a switch is due
+	 */
+	if (chrg_events.bits.battswitch)
+		return; /* already pending */
+
+	if (active_battctx.bc_sw_duration != 0 &&
+	    timer0_read() - active_battctx.bc_sw_time <
+	    active_battctx.bc_sw_duration)
+		return; /* not yet */
+
+	/* see if the other battery is also scheduled - and switch now if so */
+	switch (active_batt) {
+	case BATT_1:
+		if (battctx[BATT_2 - BATT_1].bc_sw_duration != 0) {
+			active_battctx.bc_sw_duration = 0;
+			chrg_events.bits.battswitch = 1;
+			return;
+		}
+		break;
+	case BATT_2:
+		if (battctx[BATT_1 - BATT_1].bc_sw_duration != 0) {
+			active_battctx.bc_sw_duration = 0;
+			chrg_events.bits.battswitch = 1;
+			return;
+		}
+		break;
+	default:
+		break;
+	}
+	
+	/* starting a  new cycle */
+	/*
+	 * compute weight  of each battery: if one is cc and one is cv,
 	 * give 90/10% of time.
 	 * if both are in the same state, give 50/50%
 	 * One time slot is 1s, we compute the number of 1/10s allocated
@@ -556,12 +590,18 @@ schedule_batt_switch()
 		return;
 	}
 
+	sum = sum / 10;
+	for (c = 0; c < 2; c++) {
+		time = bw[c] / sum;
+		battctx[c].bc_sw_duration = time * TIMER0_100MS;
+	}
+
 	if (chrg_fsm == CHRG_DOWN) {
-		chrg_events.bits.goon = 1;
 		/*
 		 * ready to start ? needs solar higher than batteries by 1V,
 		 * if batteries are present
 		 */
+		chrg_events.bits.goon = 1;
 		if (check_batt_active(0) && batt_v[2] < batt_v[0] + 100)
 			chrg_events.bits.goon = 0;
 		if (check_batt_active(1) && batt_v[2] < batt_v[1] + 100)
@@ -569,18 +609,12 @@ schedule_batt_switch()
 		return;
 	}
 
-	sum = sum / 10;
-	time = bw[active_bidx] / sum;
-	if (time < 10) {
-		time = time * TIMER0_100MS;
-		/* need a switch */
-		if (chrg_events.bits.battswitch) {
-			/* already pending, update currently running time */
-			active_battctx.bc_sw_time = timer0_read() -
-			    (TIMER0_100MS * 10);
-		} else if ((timer0_read() - active_battctx.bc_sw_time) > time) {
-			chrg_events.bits.battswitch = 1;
-		}
+	if (time != 0 && time < 10) {
+		/* both batteries are active, need to switch */
+		chrg_events.bits.battswitch = 1;
+	} else {
+		/* don't switch but update time */
+		active_battctx.bc_sw_time = timer0_read();
 	}
 }
 
@@ -699,6 +733,8 @@ chrg_runfsm()
 	switch(chrg_fsm) {
 	case CHRG_DOWN:
 		chrg_events.bits.battswitch = 0;
+		battctx[0].bc_sw_duration = 0;
+		battctx[1].bc_sw_duration = 0;
 		if (chrg_events.bits.goon) {
 			chrg_events.bits.goon = 0;
 			chrg_events.bits.gooff = 0;
@@ -895,6 +931,7 @@ chrg_runfsm()
 		} else {
 			/* back to previous state */
 			chrg_fsm = active_battctx.bc_chrg_fsm;
+			active_battctx.bc_sw_time = timer0_read();
 		}
 		break;
 	case CHRG_BSWITCH_WAIT:
