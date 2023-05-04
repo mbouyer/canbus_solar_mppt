@@ -172,18 +172,25 @@ int16_t batt_i[3];
 
 /*
  * Sliding average values for display.
- * 100 values per second; we average 10 values and keep 11 averaged values
- * (because we switch batteries once per second)
+ * because we switch batteries about once per second, but it may be
+ * delayed so take some margin.
+ * 100 values per second; we average 4 values and keep 64 averaged values
+ * This gives us 256 values, which should be more than enough.
  */
-uint16_t batt_v_a[3]; /* 3200 * 10 = 32000, it fits */
-int16_t  batt_i_a[3]; /* 1000 * 10 = 10000, it fits */
+uint16_t batt_v_a[3]; /* 3200 * 4 = 12800, it fits */
+int16_t  batt_i_a[3]; /* 1000 * 4 = 4000, it fits */
 uint8_t batt_a_count;
-#define BATT_A_NCOUNT 10
+#define BATT_A_NCOUNT 4
 
-#define BATT_S_NCOUNT 11
+#define BATT_S_NCOUNT 64
 uint8_t batt_s_idx;
+uint8_t batt_s_size; /* number of samples in last cycle */
+uint8_t batt_s_count; /* samples counter for current cycle */
 uint16_t batt_v_s[BATT_S_NCOUNT][3];
 int16_t  batt_i_s[BATT_S_NCOUNT][3];
+/* keep around display values */
+uint16_t batt_v_d[3];
+int16_t  batt_i_d[3];
 
 static uint32_t voltages_acc[3];
 pac_ctrl_t pac_ctrl;
@@ -616,6 +623,9 @@ schedule_batt_switch()
 		/* don't switch but update time */
 		active_battctx.bc_sw_time = timer0_read();
 	}
+	/* update stats for display */
+	batt_s_size = batt_s_count;
+	batt_s_count = 0;
 }
 
 uint8_t _mppt_debug;
@@ -735,6 +745,7 @@ chrg_runfsm()
 		chrg_events.bits.battswitch = 0;
 		battctx[0].bc_sw_duration = 0;
 		battctx[1].bc_sw_duration = 0;
+		batt_s_count = batt_s_size = 0;
 		if (chrg_events.bits.goon) {
 			chrg_events.bits.goon = 0;
 			chrg_events.bits.gooff = 0;
@@ -1568,24 +1579,15 @@ send_dc_voltage_current(char b)
 		return;
 	}
 
-	uint16_t _v = 0;
-	int16_t  _i = 0;
-	for (uint8_t c = 0; c < BATT_S_NCOUNT; c++) {
-		_v += batt_v_s[c][bidx];
-		_i += batt_i_s[c][bidx];
-	}
-	_v = _v / BATT_S_NCOUNT;
-	_i = _i / BATT_S_NCOUNT;
-
 	PGN2ID(NMEA2000_DC_VOLTAGE_CURRENT, msg.id);
 	msg.id.priority = NMEA2000_PRIORITY_INFO;
 	msg.dlc = sizeof(struct nmea2000_dc_voltage_current_data);
 	msg.data = &nmea2000_data[0];
 	data->sid = sid;
 	data->conn = b;
-	data->voltage = _v;
+	data->voltage = batt_v_d[bidx];
 	__int24 *_ip = (__int24*)(data->current);
-	*_ip = _i;
+	*_ip = batt_i_d[bidx];
 	data->reserved = 0;
 	if (! nmea2000_send_single_frame(&msg))
 		printf("send NMEA2000_DC_VOLTAGE_CURRENT failed\n");
@@ -2156,16 +2158,9 @@ static void new_page(page_t);
 static void
 battstat2buf_small(u_char b)
 {
-	uint16_t _v = 0;
-	int16_t  _i = 0;
-	for (uint8_t c = 0; c < BATT_S_NCOUNT; c++) {
-		_v += batt_v_s[c][b];
-		_i += batt_i_s[c][b];
-	}
-
 	/*can't use double for voltage because %2.1f doens't work as expected*/
-	_v = _v / BATT_S_NCOUNT;
-	double amps = (double)_i / 100 / BATT_S_NCOUNT;
+	uint16_t _v = batt_v_d[b];
+	double amps = (double)batt_i_d[b] / 100;
 
 	if (b < 2 && !check_batt_active(b)) {
 		sprintf(oled_displaybuf,
@@ -2367,15 +2362,9 @@ display_battstat_details()
 static void
 battstat2buf(u_char b)
 {
-	uint16_t _v = 0;
-	int16_t  _i = 0;
-	for (uint8_t c = 0; c < BATT_S_NCOUNT; c++) {
-		_v += batt_v_s[c][b];
-		_i += batt_i_s[c][b];
-	}
 	/*can't use double for voltage because %2.1f doens't work as expected*/
-	_v = _v / BATT_S_NCOUNT;
-	double amps = (double)_i / 100 / BATT_S_NCOUNT;
+	uint16_t _v = batt_v_d[b];
+	double amps = (double)batt_i_d[b] / 100;
 
 	if (b < 2 && !check_batt_active(b)) {
 		sprintf(oled_displaybuf,
@@ -3318,8 +3307,9 @@ again:
 	ADCON0bits.GO = 1;
 
 	memset(batt_v_s, 0, sizeof(batt_v_s));
-	memset(batt_i_s, 0, sizeof(batt_v_s));
-	batt_s_idx = BATT_S_NCOUNT;
+	memset(batt_i_s, 0, sizeof(batt_i_s));
+	batt_s_idx = 0;
+	batt_s_size = 0;
 	batt_a_count = BATT_A_NCOUNT;
 	printf("enter loop\n");
 
@@ -3591,8 +3581,13 @@ again:
 			pac_events.bits.pacavg_rdy = 0;
 			// printf("avg");
 			batt_a_count--;
-			if (batt_a_count == 0)
-				batt_s_idx--;
+			if (batt_a_count == 0) {
+				batt_s_idx++;
+				batt_s_idx = batt_s_idx & (BATT_S_NCOUNT - 1);
+				batt_s_count++;
+				if (batt_s_count > BATT_S_NCOUNT)
+					batt_s_count = BATT_S_NCOUNT;
+			}
 			for (c = 0; c < 3; c++) {
 				uint8_t bi = 2  - c;
 				/* i = acc_value * 0.00075 */
@@ -3625,10 +3620,33 @@ again:
 					batt_v_s[batt_s_idx][bi] = _v;
 				}
 			}
-			if (batt_a_count == 0)
+			if (batt_a_count == 0) {
 				batt_a_count = BATT_A_NCOUNT;
-			if (batt_s_idx == 0)
-				batt_s_idx = BATT_S_NCOUNT;
+				/*
+				 * update display values. If batt_s_size is 0
+				 * (the charger is not running, or just
+				 * started), use the last value.
+				 */
+				uint8_t idx, bi;
+				for (bi = 0; bi < 3; bi++) {
+					batt_v_d[bi] = batt_v_s[batt_s_idx][bi];
+					batt_i_d[bi] = batt_i_s[batt_s_idx][bi];
+				}
+				for (idx = batt_s_idx - 1, c = batt_s_size;
+				     c > 1; idx--, c--) {
+					idx = idx & (BATT_S_NCOUNT - 1);
+					for (bi = 0; bi < 3; bi++) {
+						batt_v_d[bi]+=batt_v_s[idx][bi];
+						batt_i_d[bi]+=batt_i_s[idx][bi];
+					}
+				}
+				if (batt_s_size > 1) {
+					for (bi = 0; bi < 3; bi++) {
+						batt_v_d[bi] /= batt_s_size;
+						batt_i_d[bi] /= batt_s_size;
+					}
+				}
+			}
 			// printf("\n");
 			if (pwm_error == PWME_NOERROR) {
 				check_batt_status();
