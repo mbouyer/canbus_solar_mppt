@@ -435,7 +435,7 @@ typedef enum {
 } batt_state_t;
 
 typedef struct {
-	uint16_t bp_stby_voltage;
+	uint16_t bp_bulk_voltage_limit;
 	uint16_t bp_bulk_voltage; 
 	uint16_t bp_float_voltage;
 } batt_params_t;
@@ -472,9 +472,9 @@ check_batt_status()
 			battctx[c].bc_stat = BATTS_NONE;
 			continue;
 		}
-		if (_v > bparams[c].bp_stby_voltage) {
+		if (_v > bparams[c].bp_bulk_voltage_limit) {
 			if (battctx[c].bc_stat == BATTS_NONE)
-				battctx[c].bc_stat = BATTS_STANDBY;
+				battctx[c].bc_stat = BATTS_FLOAT;
 		} else {
 			if (battctx[c].bc_stat == BATTS_NONE ||
 			    battctx[c].bc_stat == BATTS_STANDBY) {
@@ -3248,10 +3248,10 @@ again:
 	chrg_events.byte = 0;
 
 	/* XXX from eeprom ? */
-	bparams[BATT_1 - BATT_1].bp_stby_voltage = 125;
+	bparams[BATT_1 - BATT_1].bp_bulk_voltage_limit = 125;
 	bparams[BATT_1 - BATT_1].bp_bulk_voltage = 140;
 	bparams[BATT_1 - BATT_1].bp_float_voltage = 135;
-	bparams[BATT_2 - BATT_1].bp_stby_voltage = 125;
+	bparams[BATT_2 - BATT_1].bp_bulk_voltage_limit = 125;
 	bparams[BATT_2 - BATT_1].bp_bulk_voltage = 140;
 	bparams[BATT_2 - BATT_1].bp_float_voltage = 135;
 
