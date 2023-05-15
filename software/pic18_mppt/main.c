@@ -473,8 +473,12 @@ check_batt_status()
 			continue;
 		}
 		if (_v > bparams[c].bp_bulk_voltage_limit) {
-			if (battctx[c].bc_stat == BATTS_NONE)
+			if (battctx[c].bc_stat == BATTS_NONE) {
 				battctx[c].bc_stat = BATTS_FLOAT;
+				battctx[c].bc_cv = bparams[c].bp_float_voltage;
+				battctx[c].bc_sw_time = timer0_read();
+				battctx[c].bc_chrg_fsm = CHRG_RERAMPUP;
+			}
 		} else {
 			if (battctx[c].bc_stat == BATTS_NONE ||
 			    battctx[c].bc_stat == BATTS_STANDBY) {
@@ -2505,6 +2509,8 @@ battstate_next()
 	case BATTS_BULK:
 		battctx[c].bc_stat = BATTS_FLOAT;
 		battctx[c].bc_cv = bparams[c].bp_float_voltage;
+		battctx[c].bc_sw_time = timer0_read();
+		battctx[c].bc_chrg_fsm = CHRG_RERAMPUP;
 		break;
 	case BATTS_FLOAT:
 		battctx[c].bc_stat = BATTS_STANDBY;
