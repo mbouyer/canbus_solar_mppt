@@ -40,6 +40,7 @@
 #include "font5x8.h"
 #include "font10x16.h"
 #include "icons16x16.h"
+#include "vers.h"
 
 typedef unsigned char u_char;
 typedef unsigned int  u_int;
@@ -50,6 +51,8 @@ static u_char default_src;
 u_int devid, revid; 
 
 u_long nmea2000_user_id; 
+
+uint8_t pac_pid, pac_mid, pac_rid;
 
 static u_char sid;
 
@@ -2842,6 +2845,7 @@ main(void)
 	INTCON0bits.GIEH=1;  /* enable high-priority interrupts */   
 	INTCON0bits.GIEL=1; /* enable low-priority interrrupts */   
 
+	printf("solar_mppt %d.%d %s", MAJOR, MINOR, buildstr);
 	printf("hello user_id 0x%lx devid 0x%x revid 0x%x\n", nmea2000_user_id, devid, revid);
 
 	printf("n2k_init\n");
@@ -2996,6 +3000,24 @@ main(void)
 	CLRWDT();
 	printf(" done\n");
 
+	oled_col = 20;
+	oled_line = 1;
+	sprintf(oled_displaybuf, "solar_mppt %d.%d", MAJOR, MINOR);
+	displaybuf_small(0);
+	oled_i2c_flush();
+
+	oled_col = 20;
+	oled_line = 2;
+	sprintf(oled_displaybuf, "%s", buildstr);
+	displaybuf_small(0);
+	oled_i2c_flush();
+
+	oled_col = 20;
+	oled_line = 3;
+	sprintf(oled_displaybuf, "N2K user ID %lu", nmea2000_user_id);
+	displaybuf_small(0);
+	oled_i2c_flush();
+
 	PAC_NDOWN = 1;
 	pacops_pending.byte = 0;
 	pac_events.byte = 0;
@@ -3067,20 +3089,26 @@ again:
 	PAC_READREG(PAC_PRODUCT, i2cr);
 	if (pac_i2c_flush() == 0)
 		c++;
-	else 
+	else {
 		printf("product id 0x%x ", i2cr);
+		pac_pid = i2cr;
+	}
 
 	PAC_READREG(PAC_MANUF, i2cr);
 	if (pac_i2c_flush() == 0)
 		c++;
-	else
+	else {
 		printf("manuf id 0x%x ", i2cr);
+		pac_mid = i2cr;
+	}
 
 	PAC_READREG(PAC_REV, i2cr);
 	if (pac_i2c_flush() == 0)
 		c++;
-	else
+	else {
 		printf("rev id 0x%x\n", i2cr);
+		pac_rid = i2cr;
+	}
 
 	PAC_READREG(PAC_CTRL_ACT, pac_ctrl);
 	if (pac_i2c_flush() == 0)
@@ -3135,6 +3163,13 @@ again:
 	}
 	if (c != 0)
 		goto again;
+
+	oled_col = 10;
+	oled_line = 5;
+	sprintf(oled_displaybuf, "pac 0x%x.0x%x.0x%x",
+	    pac_pid, pac_mid, pac_rid);
+	displaybuf_small(0);
+	oled_i2c_flush();
 
 	/* set up some of our input/output */
 	PWM_OFF = 1;
@@ -3265,19 +3300,6 @@ again:
 	for (c = 0; c < 2; c++) {
 		battctx[c].bc_stat = BATTS_NONE;
 	}
-
-	oled_col = 20;
-	oled_line = 5;
-	sprintf(oled_displaybuf, "hello");
-	displaybuf_medium(0);
-	oled_i2c_flush();
-
-	for (c = 0; c < 4; c++) {
-		oled_col = 20 * c;
-		oled_line = 1;
-		displaybuf_icon(c);
-	}
-	oled_i2c_flush();
 
 	btn_state = BTN_IDLE;
 
