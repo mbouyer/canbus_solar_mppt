@@ -3696,14 +3696,20 @@ again:
 				if (_read_voltcur.batt_i[c] < 0)
 					negative_current_count = 0;
 				else {
-					/* count faster if more than 20mA */
-					if (_read_voltcur.batt_i[c] > 26)
+					/*
+					 * count faster if more than 20mA
+					 * and abort now if more than 40mA
+					 */
+					if (_read_voltcur.batt_i[c] > 52)
+						negative_current_count += 10;
+					else if (_read_voltcur.batt_i[c] > 26)
 						negative_current_count++;
 					negative_current_count++;
 					printf("battneg %d %d\n", negative_current_count, active_batt);
 				}
 				if (negative_current_count >= 10) {
 					pwm_error = PWME_BATTCUR;
+					batt_en(BATT_NONE);
 					pwm_events.bits.gooff = 1;
 					pwme_time = 0;
 				}
