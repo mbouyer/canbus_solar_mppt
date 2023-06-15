@@ -853,8 +853,8 @@
     (property "P/N" "" (at 157.48 107.95 0)
       (effects (font (size 1.27 1.27)) hide)
     )
-    (pin "1" (uuid a1174a18-94f7-4e95-9e52-f69003ad6aa3))
-    (pin "2" (uuid 897644ce-de0b-4e02-8920-c50f65e7e6a3))
+    (pin "1" (uuid 26486db3-14c7-4d92-871d-d265d3d1fee0))
+    (pin "2" (uuid 2adeefa3-9ac3-4758-880f-b772ae4a8024))
     (instances
       (project "power-spice-out"
         (path "/3b519c6d-240e-4784-9341-b4b14767d2f5"
@@ -1074,12 +1074,12 @@
   )
 
   (symbol (lib_id "Device:R") (at 182.88 91.44 90) (unit 1)
-    (in_bom yes) (on_board yes) (dnp no) (fields_autoplaced)
+    (in_bom yes) (on_board yes) (dnp no)
     (uuid d9e96b07-f19b-4dcc-ae5a-41d8de4dffbc)
     (property "Reference" "R4" (at 182.88 86.844 90)
       (effects (font (size 1.27 1.27)))
     )
-    (property "Value" "0.045" (at 182.88 88.892 90)
+    (property "Value" "0.025" (at 182.88 88.892 90)
       (effects (font (size 1.27 1.27)))
     )
     (property "Footprint" "" (at 182.88 93.218 90)
@@ -1090,6 +1090,9 @@
     )
     (property "P/N" "" (at 182.88 91.44 0)
       (effects (font (size 1.27 1.27)) hide)
+    )
+    (property "comment" "shunt resistor+cables" (at 182.88 93.98 90)
+      (effects (font (size 1.27 1.27)))
     )
     (pin "1" (uuid cb582280-22aa-4dee-a1c5-cb278ef3eb39))
     (pin "2" (uuid 8364eef1-3fa7-461b-8d6c-1ae5c2867a6c))
