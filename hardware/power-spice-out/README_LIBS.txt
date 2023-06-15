@@ -6,3 +6,6 @@ change the line
 DBD D S DBD 11335000u 
 to
 DBD D S DBD
+
+BSS123.LIB is from
+https://www.diodes.com/spice/download/2060/BSS123.spice.txt
