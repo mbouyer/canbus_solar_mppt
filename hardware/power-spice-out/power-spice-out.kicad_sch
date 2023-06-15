@@ -841,7 +841,7 @@
     (property "Reference" "R3" (at 159.258 106.926 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
-    (property "Value" "1k" (at 159.258 108.974 0)
+    (property "Value" "4.7k" (at 159.258 108.974 0)
       (effects (font (size 1.27 1.27)) (justify left))
     )
     (property "Footprint" "" (at 155.702 107.95 90)
