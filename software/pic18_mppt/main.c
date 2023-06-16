@@ -774,13 +774,13 @@ chrg_runfsm()
 				/*
 				 * Vad = (active_battv / 100) / (157 / 22 + 1)
 				 * Vad = active_battv / 813.63636
-				 * Vad = ad_pwm / 2048 * 2.048
-				 * ad_pwm = Vad * 1000
-				 * ad_pwm = active_battv / 813.63636 * 1000
+				 * Vad = ad_pwm / 4096 * 2.048
+				 * ad_pwm = Vad * 2000
+				 * ad_pwm = active_battv / 813.63636 * 2000
 				 */
 
 				target_ad_pwm = (uint16_t)(
-				    (uint32_t)active_battv * 1000 / 814);
+				    (uint32_t)active_battv * 2000 / 814);
 				pwm_fsm = PWMF_RUNNING;
 				pwm_duty_c = 40; /* start at 20% */
 				pwm_set_duty();
@@ -814,6 +814,7 @@ chrg_runfsm()
 			chrg_fsm = CHRG_GODOWN;
 		} else {
 			if (ad_pwm >= target_ad_pwm) {
+				printf("pre ad %x duty %d\n", ad_pwm, pwm_duty_c);
 				batt_en(active_batt);
 				active_battctx.bc_sw_time = timer0_read();
 				pwm_duty_c = 0;
@@ -3749,7 +3750,7 @@ again:
 					else if (_read_voltcur.batt_i[c] > 26)
 						negative_current_count++;
 					negative_current_count++;
-					printf("battneg %d %d\n", negative_current_count, active_batt);
+					printf("battneg %d %d %d\n", negative_current_count, active_batt, _read_voltcur.batt_i[c]);
 				}
 				if (negative_current_count >= 10) {
 					pwm_error = PWME_BATTCUR;
