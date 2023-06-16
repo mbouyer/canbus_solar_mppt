@@ -132,7 +132,7 @@ static union time_events {
 	char byte;
 } time_events;
 
-static uint16_t ad_pwm;
+static uint16_t ad_pwm, target_ad_pwm;
 static uint16_t ad_solar;
 static uint16_t ad_temp;
 
@@ -397,6 +397,7 @@ pwm_set_duty()
 typedef enum {
 	CHRG_DOWN = 0,
 	CHRG_PWMUP,
+	CHRG_PRECHARGE,
 	CHRG_RERAMPUP,
 	CHRG_RAMPUP,
 	CHRG_MPPT,
@@ -765,23 +766,66 @@ chrg_runfsm()
 	case CHRG_PWMUP:
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
-		} else if (pwm_fsm == PWMF_IDLE && active_batt != BATT_NONE) {
+		} else if (pwm_fsm == PWMF_IDLE && active_batt != BATT_NONE &&
+		    pac_events.bits.bvalues_updated) {
+			pac_events.bits.bvalues_updated = 0;
 			if (active_battctx.bc_stat == BATTS_BULK ||
 			    active_battctx.bc_stat == BATTS_FLOAT) {
-				batt_en(active_batt);
-				active_battctx.bc_sw_time = timer0_read();
+				/*
+				 * Vad = (active_battv / 100) / (157 / 22 + 1)
+				 * Vad = active_battv / 813.63636
+				 * Vad = ad_pwm / 2048 * 2.048
+				 * ad_pwm = Vad * 1000
+				 * ad_pwm = active_battv / 813.63636 * 1000
+				 */
+
+				target_ad_pwm = (uint16_t)(
+				    (uint32_t)active_battv * 1000 / 814);
 				pwm_fsm = PWMF_RUNNING;
-				printf("PWM RUN CON 0x%x PR 0x%x P1 0x%x act %d\n", 
+				pwm_duty_c = 40; /* start at 20% */
+				pwm_set_duty();
+				printf("PWM RUN CON 0x%x PR 0x%x P1 0x%x act %d tgt %x\n", 
 				    PWM1CON,
 				    PWM1PR,
 				    PWM1S1P1,
-				    active_batt);
-				chrg_fsm = CHRG_RERAMPUP;
+				    active_batt,
+				    target_ad_pwm);
+				/* abuse bc_sw_time for precharge timing */
+				active_battctx.bc_sw_time = timer0_read();
+				chrg_fsm = CHRG_PRECHARGE;
+				pac_events.bits.pacavg_rdy_chrg = 0;
 			} else {
 				if (active_batt == BATT_1)
 					active_batt = BATT_2;
 				else
 					active_batt = BATT_1;
+			}
+		}
+		break;
+
+	case CHRG_PRECHARGE:
+		/*
+		 * output capacitor precharge: slowly increase pwm_duty_c
+		 * until we reach target voltage.
+		 * spice shows that it takes 150µs at 80% duty to reach 12.5V
+		 * with max solar power
+		 */
+		if (chrg_events.bits.gooff) {
+			chrg_fsm = CHRG_GODOWN;
+		} else {
+			if (ad_pwm >= target_ad_pwm) {
+				batt_en(active_batt);
+				active_battctx.bc_sw_time = timer0_read();
+				pwm_duty_c = 0;
+				pwm_set_duty();
+				chrg_fsm = CHRG_RERAMPUP;
+				pac_events.bits.bvalues_updated = 0;
+			} else if ((timer0_read() - active_battctx.bc_sw_time) >
+			    TIMER0_1MS) {
+				pwm_duty_c += 5;
+				if (pwm_duty_c > PWM_DUTY_MAX)
+					pwm_duty_c = PWM_DUTY_MAX;
+				pwm_set_duty();
 			}
 		}
 		break;
