@@ -3738,18 +3738,16 @@ again:
 					break;
 				}
 				/* batt current is inverted */
-				if (_read_voltcur.batt_i[c] < 0)
+				if (_read_voltcur.batt_i[c] <= 0)
 					negative_current_count = 0;
 				else {
 					/*
-					 * count faster if more than 20mA
-					 * and abort now if more than 40mA
+					 * count proportional to negative
+					 * current, and abort immediately if
+					 * more than 200mA (266)
 					 */
-					if (_read_voltcur.batt_i[c] > 52)
-						negative_current_count += 10;
-					else if (_read_voltcur.batt_i[c] > 26)
-						negative_current_count++;
-					negative_current_count++;
+					negative_current_count +=
+					    (_read_voltcur.batt_i[c] + 25) / 26;
 					printf("battneg %d %d %d\n", negative_current_count, active_batt, _read_voltcur.batt_i[c]);
 				}
 				if (negative_current_count >= 10) {
