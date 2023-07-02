@@ -1791,6 +1791,9 @@ putch(char c)
         if (PORTBbits.RB7) {
 		usart_putchar(c);
 	}
+#ifdef N2K_PRINTF
+	nmea2000_putchar(c);
+#endif
 }
 
 static void
@@ -3602,6 +3605,27 @@ again:
 		
 			if (time_events.bits.ev_1hz) {
 				seconds++;
+				/* every 10s print states */
+				if ((seconds % 10) == 0) {
+					uint16_t _v = batt_v_d[2];
+					double amps = (double)batt_i_d[2] / 100;
+					printf("So %2d.%1dV %1.02fA",
+					    _v / 100, (_v % 100) / 10, amps);
+					_v = batt_v_d[1];
+					amps = (double)batt_i_d[1] / 100;
+					printf(" Se %2d.%1d %1.02fA 0x%x",
+					    _v / 100, (_v % 100) / 10, amps,
+					    battctx[1].bc_stat);
+					_v = batt_v_d[0];
+					amps = (double)batt_i_d[0] / 100;
+					printf(" Mo %2d.%1d %1.02fA 0x%x",
+					    _v / 100, (_v % 100) / 10, amps,
+					    battctx[0].bc_stat);
+					printf(" %2.2f%c",
+					    (float)board_temp / 100.0 - 273.15,
+					    20);
+					printf("\n");
+				}
 				if (seconds == 600) {
 					// USELOG update_log();
 					seconds = 0;
