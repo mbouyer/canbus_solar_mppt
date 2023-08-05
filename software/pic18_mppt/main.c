@@ -481,7 +481,19 @@ check_batt_status()
 			battctx[c].bc_stat = BATTS_NONE;
 			continue;
 		}
-		if (_v > bparams[c].bp_bulk_voltage_limit) {
+		if (battctx[c].bc_stat == BATTS_BULK &&
+		    battctx[c].bc_chrg_fsm == CHRG_CV) {
+			/*
+			 * if charging at less than 200mA at bulk voltage
+			 * (known as tail current), switch to float
+			 */
+			if (battctx[c].bc_r_chrg.chrgp_iout < 10) {
+				printf("batt %d iout %d -> FLOAT\n",
+				    c, battctx[c].bc_r_chrg.chrgp_iout);
+				battctx[c].bc_stat = BATTS_FLOAT;
+				battctx[c].bc_cv = bparams[c].bp_float_voltage;
+			}
+		} else if (_v > bparams[c].bp_bulk_voltage_limit) {
 			if (battctx[c].bc_stat == BATTS_NONE) {
 				battctx[c].bc_stat = BATTS_FLOAT;
 				battctx[c].bc_cv = bparams[c].bp_float_voltage;
