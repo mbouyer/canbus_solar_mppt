@@ -108,6 +108,7 @@ batt_en(batt_t b)
 }
 
 static batt_t active_batt;
+static batt_t active_batt_e;
 
 static char counter_100hz;
 static char counter_100hz;
@@ -222,7 +223,7 @@ static union pac_events {
  * BATTOFF: prepare for off: BATT1_OFF, bATT2_OFF
  * DISCHARGE: prepare for off: PWM_OUT = 0, PWM_MID = 0,
  */
-static enum {
+typedef enum {
 	PWMF_DOWN = 0,
 	PWMF_TURNON,
 	PWMF_ON,
@@ -232,12 +233,15 @@ static enum {
 	PWMF_GOIDLE,
 	PWMF_BATTOFF,
 	PWMF_DISCHARGE,
-} pwm_fsm;
+} pwm_fsm_t;
+static pwm_fsm_t pwm_fsm;
+static pwm_fsm_t pwm_fsm_e;
 
 static volatile union pwm_events {
 	struct pwm_evtbits {
 		char goon : 1;	/* turn PWM on */
 		char gooff : 1; /* turn PWM off */
+		char goerr : 1; /* PWM error detected */
 	} bits;
 	char byte;
 } pwm_events;
@@ -408,6 +412,7 @@ typedef enum {
 } chrg_fsm_t;
 
 static chrg_fsm_t chrg_fsm;
+static chrg_fsm_t chrg_fsm_e;
 
 static volatile union chrg_events {
 	struct chrg_evtbits {
@@ -3434,6 +3439,10 @@ again:
 			    chrg_fsm != CHRG_DOWN) {
 				pwm_error = PWME_OVERTEMP;
 				pwm_events.bits.gooff = 1;
+				pwm_events.bits.goerr = 1;
+				active_batt_e = active_batt;
+				pwm_fsm_e = pwm_fsm;
+				chrg_fsm_e = chrg_fsm;
 			}
 			for (c = 0; c < 2; c++) {
 				if (battctx[c].bc_rp_time != 0)
@@ -3776,8 +3785,12 @@ again:
 				}
 				if (negative_current_count >= 10) {
 					pwm_error = PWME_BATTCUR;
+					active_batt_e = active_batt;
+					pwm_fsm_e = pwm_fsm;
+					chrg_fsm_e = chrg_fsm;
 					batt_en(BATT_NONE);
 					pwm_events.bits.gooff = 1;
+					pwm_events.bits.goerr = 1;
 					pwme_time = 0;
 				}
 			} else {
@@ -3785,6 +3798,11 @@ again:
 			}
 			if (pwm_error == PWME_NOERROR)
 				schedule_batt_switch();
+		}
+		if (pwm_events.bits.goerr) {
+			pwm_events.bits.goerr = 0;
+			printf("PWM_E %d ab %d pwm %d chrg %d\n",
+			    pwm_error, active_batt_e, pwm_fsm_e, chrg_fsm_e);
 		}
 		pac_command_schedule();
 		while (i2c_return != I2C_INPROGRESS) {
@@ -3897,7 +3915,11 @@ irqh_ioc(void)
 	IOCCFbits.IOCCF0 = 0;
 	PIE0bits.IOCIE = 0;
 	pwm_events.bits.gooff = 1;
+	pwm_events.bits.goerr = 1;
 	pwm_error = PWME_PWMOK;
+	active_batt_e = active_batt;
+	pwm_fsm_e = pwm_fsm;
+	chrg_fsm_e = chrg_fsm;
 	pwme_time = 0;
 }
 
@@ -3907,8 +3929,12 @@ irqh_cm1(void)
 	PIR1bits.C1IF = 0;
 	PIE1bits.C1IE = 0;
 	pwm_events.bits.gooff = 1;
+	pwm_events.bits.goerr = 1;
 	pwm_error = PWME_PWMV;
 	pwme_time = 0;
+	active_batt_e = active_batt;
+	pwm_fsm_e = pwm_fsm;
+	chrg_fsm_e = chrg_fsm;
 }
 
 void __interrupt(__irq(CM2), __low_priority, base(IVECT_BASE))
