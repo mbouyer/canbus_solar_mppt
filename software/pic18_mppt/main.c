@@ -3342,10 +3342,10 @@ again:
 	chrg_events.byte = 0;
 
 	/* XXX from eeprom ? */
-	bparams[BATT_1 - BATT_1].bp_bulk_voltage_limit = 125;
+	bparams[BATT_1 - BATT_1].bp_bulk_voltage_limit = 128;
 	bparams[BATT_1 - BATT_1].bp_bulk_voltage = 140;
 	bparams[BATT_1 - BATT_1].bp_float_voltage = 135;
-	bparams[BATT_2 - BATT_1].bp_bulk_voltage_limit = 125;
+	bparams[BATT_2 - BATT_1].bp_bulk_voltage_limit = 128;
 	bparams[BATT_2 - BATT_1].bp_bulk_voltage = 140;
 	bparams[BATT_2 - BATT_1].bp_float_voltage = 135;
 
