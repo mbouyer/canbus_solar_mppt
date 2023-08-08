@@ -487,7 +487,7 @@ check_batt_status()
 			 * if charging at less than 200mA at bulk voltage
 			 * (known as tail current), switch to float
 			 */
-			if (battctx[c].bc_r_chrg.chrgp_iout < 10) {
+			if (battctx[c].bc_r_chrg.chrgp_iout < 10 && battctx[c].bc_r_chrg.chrgp_iout > 0) {
 				printf("batt %d iout %d -> FLOAT\n",
 				    c, battctx[c].bc_r_chrg.chrgp_iout);
 				battctx[c].bc_stat = BATTS_FLOAT;
