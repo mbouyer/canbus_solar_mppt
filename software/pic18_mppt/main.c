@@ -827,16 +827,18 @@ chrg_runfsm()
 		 * spice shows that it takes 150µs at 80% duty to reach 12.5V
 		 * with max solar power
 		 */
+		PIE1bits.C1IE = 0;
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
 		} else {
-			if (ad_pwm >= target_ad_pwm) {
+			if (ad_pwm >= target_ad_pwm || PIR1bits.C1IF) {
 				printf("pre ad %x duty %d\n", ad_pwm, pwm_duty_c);
 				batt_en(active_batt);
 				active_battctx.bc_sw_time = timer0_read();
 				pwm_duty_c = 0;
 				pwm_set_duty();
 				chrg_fsm = CHRG_RERAMPUP;
+				chrg_batt_grace = 4;
 				pac_events.bits.bvalues_updated = 0;
 			} else if ((timer0_read() - active_battctx.bc_sw_time) >
 			    TIMER0_1MS) {
@@ -852,6 +854,10 @@ chrg_runfsm()
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
 		} else if (pac_events.bits.bvalues_updated) {
+			if (chrg_batt_grace)
+				chrg_batt_grace--;
+			if (chrg_batt_grace == 0)
+				PIE1bits.C1IE = 1;
 			pac_events.bits.bvalues_updated = 0;
 			pwm_duty_c = 40; /* start at 20% */
 			pwm_set_duty();
@@ -867,7 +873,8 @@ chrg_runfsm()
 				/* if we're at target voltage go to CV mode */
 				chrg_volt_target_cnt = 0;
 				chrg_fsm = CHRG_CV;
-				chrg_batt_grace = 0;
+				chrg_batt_grace = 4;
+				PIE1bits.C1IE = 0;
 			}
 		}
 		if (pac_events.bits.pacavg_rdy_chrg &&
@@ -917,6 +924,10 @@ chrg_runfsm()
 		}
 		if (pac_events.bits.bvalues_updated) {
 			pac_events.bits.bvalues_updated = 0;
+			if (chrg_batt_grace)
+				chrg_batt_grace--;
+			if (chrg_batt_grace == 0)
+				PIE1bits.C1IE = 1;
 			if ((active_battv / 10) > active_battctx.bc_cv + 1) {
 				chrg_volt_target_cnt++;
 				/*
@@ -928,7 +939,6 @@ chrg_runfsm()
 				    (active_battv / 10) > active_battctx.bc_cv + 5) {
 					chrg_volt_target_cnt = 0;
 					chrg_fsm = CHRG_CV;
-					chrg_batt_grace = 0;
 				}
 			} else {
 				chrg_volt_target_cnt = 0;
@@ -957,6 +967,8 @@ chrg_runfsm()
 			/* wait for grace period before checking for mode sw */
 			if (chrg_batt_grace)
 				chrg_batt_grace--;
+			if (chrg_batt_grace == 0)
+				PIE1bits.C1IE = 1;
 			if (chrg_batt_grace == 0 &&
 			    _v < active_battctx.bc_cv - 1) {
 				chrg_volt_target_cnt++;
@@ -1035,6 +1047,7 @@ chrg_runfsm()
 			 * (we have minimum 10 read cycles before switching)
 			 */
 			chrg_batt_grace = 4;
+			PIE1bits.C1IE = 0;
 		}
 		break;
 	case CHRG_GODOWN:
@@ -3813,8 +3826,8 @@ again:
 		}
 		if (pwm_events.bits.goerr) {
 			pwm_events.bits.goerr = 0;
-			printf("PWM_E %d ab %d pwm %d chrg %d\n",
-			    pwm_error, active_batt_e, pwm_fsm_e, chrg_fsm_e);
+			printf("PWM_E %d ab %d pwm %d chrg %d gr %d\n",
+			    pwm_error, active_batt_e, pwm_fsm_e, chrg_fsm_e, chrg_batt_grace);
 		}
 		pac_command_schedule();
 		while (i2c_return != I2C_INPROGRESS) {
