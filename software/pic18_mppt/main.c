@@ -841,7 +841,6 @@ chrg_runfsm()
 				pwm_duty_c = 0;
 				pwm_set_duty();
 				chrg_fsm = CHRG_RERAMPUP;
-				chrg_batt_grace = 4;
 				pac_events.bits.bvalues_updated = 0;
 			} else if ((timer0_read() - active_battctx.bc_sw_time) >
 			    TIMER0_1MS) {
@@ -863,6 +862,7 @@ chrg_runfsm()
 			active_battctx.bc_r_chrg.chrgp_iout = -1;
 			chrg_fsm = CHRG_RAMPUP;
 			chrg_batt_grace = 4;
+			PIE1bits.C1IE = 0;
 		}
 		break;
 
@@ -871,8 +871,10 @@ chrg_runfsm()
 			pac_events.bits.bvalues_updated = 0;
 			if (chrg_batt_grace)
 				chrg_batt_grace--;
-			if (chrg_batt_grace == 0)
+			if (chrg_batt_grace == 0) {
+				PIR1bits.C1IF = 0;
 				PIE1bits.C1IE = 1;
+			}
 			if ((active_battv / 10) > active_battctx.bc_cv) {
 				/* if we're at target voltage go to CV mode */
 				chrg_volt_target_cnt = 0;
@@ -930,8 +932,10 @@ chrg_runfsm()
 			pac_events.bits.bvalues_updated = 0;
 			if (chrg_batt_grace)
 				chrg_batt_grace--;
-			if (chrg_batt_grace == 0)
+			if (chrg_batt_grace == 0) {
+				PIR1bits.C1IF = 0;
 				PIE1bits.C1IE = 1;
+			}
 			if ((active_battv / 10) > active_battctx.bc_cv + 1) {
 				chrg_volt_target_cnt++;
 				/*
@@ -971,8 +975,10 @@ chrg_runfsm()
 			/* wait for grace period before checking for mode sw */
 			if (chrg_batt_grace)
 				chrg_batt_grace--;
-			if (chrg_batt_grace == 0)
+			if (chrg_batt_grace == 0) {
+				PIR1bits.C1IF = 0;
 				PIE1bits.C1IE = 1;
+			}
 			if (chrg_batt_grace == 0 &&
 			    _v < active_battctx.bc_cv - 1) {
 				chrg_volt_target_cnt++;
