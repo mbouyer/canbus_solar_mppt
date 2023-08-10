@@ -862,6 +862,7 @@ chrg_runfsm()
 			pwm_set_duty();
 			active_battctx.bc_r_chrg.chrgp_iout = -1;
 			chrg_fsm = CHRG_RAMPUP;
+			chrg_batt_grace = 4;
 		}
 		break;
 
