@@ -3655,9 +3655,8 @@ again:
 					printf(" Mo %2d.%1d %1.02fA 0x%x",
 					    _v / 100, (_v % 100) / 10, amps,
 					    battctx[0].bc_stat);
-					printf(" %2.2f%c",
-					    (float)board_temp / 100.0 - 273.15,
-					    20);
+					printf(" %2.2f",
+					    (float)board_temp / 100.0 - 273.15);
 					printf("\n");
 				}
 				if (seconds == 600) {
