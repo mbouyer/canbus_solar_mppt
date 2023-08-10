@@ -81,6 +81,7 @@ typedef enum {
 	BATT_1 = 1, /* engine */
 	BATT_2 = 2, /* service */
 } batt_t;
+static uint8_t chrg_battcurr_grace; /* grace cycles after batt switch  */
 
 static void
 batt_en(batt_t b)
@@ -97,12 +98,14 @@ batt_en(batt_t b)
 		CLCnPOLbits.G2POL = 1;
 		CLCSELECT = 3;
 		CLCnPOLbits.G2POL = 0;
+		chrg_battcurr_grace = 1;
 		break;
 	case BATT_2:
 		CLCSELECT = 2;
 		CLCnPOLbits.G2POL = 0;
 		CLCSELECT = 3;
 		CLCnPOLbits.G2POL = 1;
+		chrg_battcurr_grace = 1;
 		break;
 	}
 }
@@ -428,7 +431,7 @@ static uint16_t chrg_current_accum;
 static uint8_t chrg_accum_cnt;
 static int8_t chrg_duty_change;
 static uint8_t chrg_volt_target_cnt;
-static uint8_t chrg_batt_grace; /* grace cycles after batt switch in CV mode */
+static uint8_t chrg_batt_grace; /* grace cycles after batt or chrg switch  */
 
 struct chrg_param {
 	uint8_t chrgp_pwm; /* pwm value */
@@ -854,10 +857,6 @@ chrg_runfsm()
 		if (chrg_events.bits.gooff) {
 			chrg_fsm = CHRG_GODOWN;
 		} else if (pac_events.bits.bvalues_updated) {
-			if (chrg_batt_grace)
-				chrg_batt_grace--;
-			if (chrg_batt_grace == 0)
-				PIE1bits.C1IE = 1;
 			pac_events.bits.bvalues_updated = 0;
 			pwm_duty_c = 40; /* start at 20% */
 			pwm_set_duty();
@@ -869,6 +868,10 @@ chrg_runfsm()
 	case CHRG_RAMPUP:
 		if (pac_events.bits.bvalues_updated) {
 			pac_events.bits.bvalues_updated = 0;
+			if (chrg_batt_grace)
+				chrg_batt_grace--;
+			if (chrg_batt_grace == 0)
+				PIE1bits.C1IE = 1;
 			if ((active_battv / 10) > active_battctx.bc_cv) {
 				/* if we're at target voltage go to CV mode */
 				chrg_volt_target_cnt = 0;
@@ -3365,6 +3368,7 @@ again:
 
 	chrg_fsm = CHRG_DOWN;
 	chrg_events.byte = 0;
+	chrg_battcurr_grace = chrg_batt_grace = 0;
 
 	/* XXX from eeprom ? */
 	bparams[BATT_1 - BATT_1].bp_bulk_voltage_limit = 128;
@@ -3795,7 +3799,8 @@ again:
 					break;
 				}
 				/* batt current is inverted */
-				if (_read_voltcur.batt_i[c] <= 0)
+				if (_read_voltcur.batt_i[c] <= 0 ||
+				    chrg_battcurr_grace != 0)
 					negative_current_count = 0;
 				else {
 					/*
@@ -3817,6 +3822,8 @@ again:
 					pwm_events.bits.goerr = 1;
 					pwme_time = 0;
 				}
+				if (chrg_battcurr_grace != 0)
+					chrg_battcurr_grace--;
 			} else {
 				negative_current_count = 0;
 			}
@@ -3825,8 +3832,8 @@ again:
 		}
 		if (pwm_events.bits.goerr) {
 			pwm_events.bits.goerr = 0;
-			printf("PWM_E %d ab %d pwm %d chrg %d gr %d\n",
-			    pwm_error, active_batt_e, pwm_fsm_e, chrg_fsm_e, chrg_batt_grace);
+			printf("PWM_E %d ab %d pwm %d chrg %d gr %d %d\n",
+			    pwm_error, active_batt_e, pwm_fsm_e, chrg_fsm_e, chrg_batt_grace, chrg_battcurr_grace);
 		}
 		pac_command_schedule();
 		while (i2c_return != I2C_INPROGRESS) {
