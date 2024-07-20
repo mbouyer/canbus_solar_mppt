@@ -3671,7 +3671,9 @@ again:
 					printf("\n");
 				}
 				if (seconds == 600) {
-					// USELOG update_log();
+#ifdef USELOG
+					update_log();
+#endif
 					seconds = 0;
 				}
 				// USEADC  ADCON0bits.ADON = 1; /* start a new cycle */
