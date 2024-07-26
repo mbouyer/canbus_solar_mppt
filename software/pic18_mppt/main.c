@@ -198,6 +198,7 @@ int16_t  batt_i_s[BATT_S_NCOUNT][3];
 /* keep around display values */
 uint16_t batt_v_d[3];
 int16_t  batt_i_d[3];
+uint8_t batt_i_d_valid;
 
 static uint32_t voltages_acc[3];
 pac_ctrl_t pac_ctrl;
@@ -443,6 +444,7 @@ typedef enum {
 	BATTS_BULK, /* charge at max current or bulk voltage */
 	BATTS_FLOAT, /* charge at float voltage */
 	BATTS_STANDBY, /* do not charge */
+	BATTS_DISABLE, /* forced stanby; user intervention to go back charging*/
 	BATTS_ERR, /* error state */
 } batt_state_t;
 
@@ -478,21 +480,47 @@ static batt_context_t battctx[2];
 static void
 check_batt_status()
 {
+	/*
+	 * if one battery at float voltage with low current (< 40mA),
+	 * while the other one wants more, switch it to standby
+	 */
+	if (battctx[0].bc_stat == BATTS_FLOAT &&
+	    battctx[0].bc_chrg_fsm == CHRG_CV && 
+	    batt_i_d_valid && batt_i_d[0] < 4 && batt_i_d[0] > 0) {
+		if (battctx[1].bc_chrg_fsm == CHRG_MPPT ||
+		    battctx[1].bc_stat == BATTS_BULK) {
+			printf("batt 0 iout %d -> STANDBY\n", batt_i_d[0]);
+			battctx[0].bc_stat = BATTS_STANDBY;
+		}
+	}
+	if (battctx[1].bc_stat == BATTS_FLOAT &&
+	    battctx[1].bc_chrg_fsm == CHRG_CV && 
+	    batt_i_d_valid && batt_i_d[1] < 4 && batt_i_d[1] > 0) {
+		if (battctx[0].bc_chrg_fsm == CHRG_MPPT ||
+		    battctx[0].bc_stat == BATTS_BULK) {
+			printf("batt 1 iout %d -> STANDBY\n", batt_i_d[1]);
+			battctx[1].bc_stat = BATTS_STANDBY;
+		}
+	}
+
 	for (char c = 0; c < 2; c++) {
 		uint8_t _v = (uint8_t)(batt_v[c] / 10);
 		if (_v <= BATT_MINV) {
 			battctx[c].bc_stat = BATTS_NONE;
 			continue;
 		}
+		if (battctx[c].bc_stat == BATTS_DISABLE)
+			continue;
 		if (battctx[c].bc_stat == BATTS_BULK &&
 		    battctx[c].bc_chrg_fsm == CHRG_CV) {
 			/*
 			 * if charging at less than 200mA at bulk voltage
 			 * (known as tail current), switch to float
 			 */
-			if (battctx[c].bc_r_chrg.chrgp_iout < 10 && battctx[c].bc_r_chrg.chrgp_iout > 0) {
+	    		if (batt_i_d_valid && batt_i_d[c] < 20 &&
+			    batt_i_d[c] > 0) {
 				printf("batt %d iout %d -> FLOAT\n",
-				    c, battctx[c].bc_r_chrg.chrgp_iout);
+				    c, batt_i_d[c]);
 				battctx[c].bc_stat = BATTS_FLOAT;
 				battctx[c].bc_cv = bparams[c].bp_float_voltage;
 			}
@@ -504,10 +532,14 @@ check_batt_status()
 				battctx[c].bc_chrg_fsm = CHRG_RERAMPUP;
 			}
 		} else {
-			if (battctx[c].bc_stat == BATTS_NONE ||
-			    battctx[c].bc_stat == BATTS_STANDBY) {
+			if (battctx[c].bc_stat == BATTS_NONE) {
 				battctx[c].bc_stat = BATTS_BULK;
 				battctx[c].bc_cv = bparams[c].bp_bulk_voltage;
+				battctx[c].bc_sw_time = timer0_read();
+				battctx[c].bc_chrg_fsm = CHRG_RERAMPUP;
+			} else if (battctx[c].bc_stat == BATTS_STANDBY) {
+				battctx[c].bc_stat = BATTS_FLOAT;
+				battctx[c].bc_cv = bparams[c].bp_float_voltage;
 				battctx[c].bc_sw_time = timer0_read();
 				battctx[c].bc_chrg_fsm = CHRG_RERAMPUP;
 			}
@@ -774,6 +806,7 @@ chrg_runfsm()
 		battctx[0].bc_sw_duration = 0;
 		battctx[1].bc_sw_duration = 0;
 		batt_s_count = batt_s_size = 0;
+		batt_i_d_valid = 0;
 		if (chrg_events.bits.goon) {
 			chrg_events.bits.goon = 0;
 			chrg_events.bits.gooff = 0;
@@ -2403,6 +2436,9 @@ displaybuf_battstat(char b)
 	case BATTS_STANDBY:
 		sprintf(oled_displaybuf, "standby");
 		break;
+	case BATTS_DISABLE:
+		sprintf(oled_displaybuf, "disable");
+		break;
 	case BATTS_ERR:
 		sprintf(oled_displaybuf, "error  ");
 		break;
@@ -2607,6 +2643,9 @@ battstate_next()
 		battctx[c].bc_stat = BATTS_STANDBY;
 		break;
 	case BATTS_STANDBY:
+		battctx[c].bc_stat = BATTS_DISABLE;
+		break;
+	case BATTS_DISABLE:
 		battctx[c].bc_stat = BATTS_BULK;
 		battctx[c].bc_cv = bparams[c].bp_bulk_voltage;
 		battctx[c].bc_sw_time = timer0_read();
@@ -3658,14 +3697,14 @@ again:
 					    _v / 100, (_v % 100) / 10, amps);
 					_v = batt_v_d[1];
 					amps = (double)batt_i_d[1] / 100;
-					printf(" Se %2d.%1d %1.02fA 0x%x",
+					printf(" Se %2d.%1d %1.02fA 0x%x 0x%x",
 					    _v / 100, (_v % 100) / 10, amps,
-					    battctx[1].bc_stat);
+					    battctx[1].bc_stat, battctx[1].bc_chrg_fsm);
 					_v = batt_v_d[0];
 					amps = (double)batt_i_d[0] / 100;
-					printf(" Mo %2d.%1d %1.02fA 0x%x",
+					printf(" Mo %2d.%1d %1.02fA 0x%x 0x%x",
 					    _v / 100, (_v % 100) / 10, amps,
-					    battctx[0].bc_stat);
+					    battctx[0].bc_stat, battctx[0].bc_chrg_fsm);
 					printf(" %2.2f",
 					    (float)board_temp / 100.0 - 273.15);
 					printf("\n");
@@ -3788,6 +3827,7 @@ again:
 						batt_v_d[bi] /= batt_s_size;
 						batt_i_d[bi] /= batt_s_size;
 					}
+					batt_i_d_valid = 1;
 				}
 			}
 			// printf("\n");
