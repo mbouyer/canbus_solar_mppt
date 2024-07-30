@@ -437,6 +437,7 @@ static uint8_t chrg_batt_grace; /* grace cycles after batt or chrg switch  */
 struct chrg_param {
 	uint8_t chrgp_pwm; /* pwm value */
 	int16_t chrgp_iout; /* intensity output */
+	uint16_t chrgp_vin; /* voltage input */
 };
 
 typedef enum {
@@ -762,6 +763,8 @@ chrg_mppt_compute()
 		active_battctx.bc_r_chrg.chrgp_pwm = pwm_duty_c;
 		active_battctx.bc_r_chrg.chrgp_iout =
 		    -_read_voltcur.batt_i[2 - active_bidx];
+		active_battctx.bc_r_chrg.chrgp_vin =
+		    -_read_voltcur.batt_v[0];
 	} else if (timer0_read() - active_battctx.bc_sw_time > TIMER0_5MS * 4) {
 		/* check if we need to re-do a rampup */
 		if (active_battctx.bc_rp_time == 0) {
@@ -785,13 +788,30 @@ chrg_mppt_compute()
 			    -_read_voltcur.batt_i[2 - active_bidx]);
 			chrg_fsm = CHRG_RERAMPUP;
 		}
-
-		if ((_mppt_debug++ % 128) == 0) {
-			printf("bc_r_i %x curr %x df %d\n",
+		if ((_mppt_debug % 128) == 0) {
+			printf("bc_r_i %x curr %x df %d",
 			    active_battctx.bc_r_chrg.chrgp_iout,
 			    -_read_voltcur.batt_i[2 - active_bidx],
 			    (int)cdiff);
 		}
+		/* cdiff = active_battctx.bc_r_chrg.chrgp_vin - vin */
+		cdiff =
+		    ((int32_t)active_battctx.bc_r_chrg.chrgp_vin - (int32_t)_read_voltcur.batt_v[0]);
+		if (cdiff < -4098) { /* 2V highter */
+			printf("reramp V %d (%x %x)\n",
+			    (int)cdiff,
+			    active_battctx.bc_r_chrg.chrgp_vin,
+			    _read_voltcur.batt_v[0]);
+			chrg_fsm = CHRG_RERAMPUP;
+		}
+
+		if ((_mppt_debug % 128) == 0) {
+			printf(" bc_r_v %x curr %x df %d\n",
+			    active_battctx.bc_r_chrg.chrgp_vin,
+			    -_read_voltcur.batt_v[0],
+			    (int)cdiff);
+		}
+		_mppt_debug++;
 	}
 }
 
