@@ -8096,7 +8096,7 @@
 		(uuid "abfd00cf-acf1-4bb4-9907-3e61f160d0fe")
 	)
 	(label "PWM_OK"
-		(at 123.19 107.442 90)
+		(at 106.68 106.68 90)
 		(fields_autoplaced yes)
 		(effects
 			(font
@@ -8151,7 +8151,7 @@
 		(uuid "dd3faa7a-50fa-4161-8d77-69a8e0e43511")
 	)
 	(label "PWM_OFF"
-		(at 106.68 106.426 90)
+		(at 123.19 107.95 90)
 		(fields_autoplaced yes)
 		(effects
 			(font
